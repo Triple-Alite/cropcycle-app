@@ -1,0 +1,459 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  FIELD_AGENT
+  CROP_SCIENTIST
+  FARM_MANAGER
+  FARMER
+}
+
+enum FarmMemberRole {
+  OWNER
+  FARM_MANAGER
+  FIELD_WORKER
+  AGRADAR_AGENT
+}
+
+enum FarmingMethod {
+  MONO_CROPPING
+  MIXED_FARMING
+  NOT_RECORDED
+}
+
+enum FarmStatus {
+  ACTIVE
+  INACTIVE
+  FALLOW
+  ARCHIVED
+}
+
+enum SeasonStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum CropRecordType {
+  PREVIOUS
+  INTENDED
+  AVAILABLE
+  MARKETABLE
+  ACTUAL
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+  CONFLICT
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+enum DeviceOwnership {
+  CROPCYCLE
+  CUSTOMER
+}
+
+enum KnowledgeStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+enum RecommendationStatus {
+  DRAFT
+  NEEDS_REVIEW
+  APPROVED
+  SHARED
+  ARCHIVED
+}
+
+model User {
+  id                  String           @id @default(cuid())
+  email               String           @unique @db.VarChar(320)
+  name                String           @db.VarChar(160)
+  passwordHash        String?          @db.VarChar(255)
+  role                UserRole         @default(FARMER)
+  emailVerifiedAt     DateTime?
+  disabledAt          DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  farmerProfile       Farmer?          @relation("FarmerUser")
+  createdFarmers      Farmer[]         @relation("FarmerCreatedBy")
+  farmMemberships     FarmMembership[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  registeredDevices   Device[]         @relation("DeviceRegistrar")
+  createdKnowledge    KnowledgeRule[]  @relation("KnowledgeAuthor")
+  approvedKnowledge   KnowledgeRule[]  @relation("KnowledgeApprover")
+  reviewedRecs        Recommendation[] @relation("RecommendationReviewer")
+  recordedFeedback    Feedback[]
+
+  @@index([role, disabledAt])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique @db.VarChar(128)
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique @db.VarChar(128)
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Farmer {
+  id               String              @id @default(cuid())
+  farmerCode       String              @unique @db.VarChar(24)
+  userId           String?             @unique
+  createdById      String
+  name             String              @db.VarChar(160)
+  phone            String?             @db.VarChar(32)
+  email            String?             @db.VarChar(320)
+  location         String?             @db.VarChar(240)
+  farmingMethod    FarmingMethod       @default(NOT_RECORDED)
+  farmingDetails   String?             @db.Text
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  user             User?               @relation("FarmerUser", fields: [userId], references: [id], onDelete: SetNull)
+  createdBy        User                @relation("FarmerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  farms            Farm[]
+  soilReadings     SoilReading[]
+  recommendations  Recommendation[]
+  outcomes         Outcome[]
+  feedback         Feedback[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([location])
+}
+
+model FarmerIdCounter {
+  name  String @id @db.VarChar(32)
+  value BigInt @default(0)
+}
+
+model Farm {
+  id             String           @id @default(cuid())
+  farmCode       String           @unique @db.VarChar(32)
+  ownerFarmerId  String
+  name           String           @db.VarChar(160)
+  location       String?          @db.VarChar(240)
+  areaHectares   Decimal?         @db.Decimal(12, 3)
+  status         FarmStatus       @default(ACTIVE)
+  farmingMethod FarmingMethod    @default(NOT_RECORDED)
+  boundary       Json?
+  latitude       Decimal?         @db.Decimal(9, 6)
+  longitude      Decimal?         @db.Decimal(9, 6)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  owner          Farmer           @relation(fields: [ownerFarmerId], references: [id], onDelete: Restrict)
+  memberships    FarmMembership[]
+  plots          Plot[]
+  seasons        Season[]
+  devices        Device[]
+  deviceAssignments DeviceAssignment[]
+  soilReadings   SoilReading[]
+  recommendations Recommendation[]
+  outcomes       Outcome[]
+
+  @@index([ownerFarmerId, status])
+  @@index([location])
+}
+
+model FarmMembership {
+  id            String         @id @default(cuid())
+  farmId        String
+  userId        String
+  role          FarmMemberRole
+  canManageFarm Boolean        @default(false)
+  canManagePlots Boolean       @default(false)
+  canManageSeasons Boolean     @default(false)
+  canRecordSoil Boolean        @default(false)
+  canViewRecommendations Boolean @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  farm          Farm           @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([farmId, userId])
+  @@index([userId, role])
+}
+
+model Plot {
+  id             String           @id @default(cuid())
+  farmId         String
+  plotCode       String           @unique @db.VarChar(32)
+  name           String           @db.VarChar(160)
+  areaHectares   Decimal?         @db.Decimal(12, 3)
+  location       String?          @db.VarChar(240)
+  latitude       Decimal?         @db.Decimal(9, 6)
+  longitude      Decimal?         @db.Decimal(9, 6)
+  boundary       Json?
+  farmingMethod FarmingMethod    @default(NOT_RECORDED)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  farm           Farm             @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  seasons        Season[]
+  soilReadings   SoilReading[]
+  devices        Device[]
+  deviceAssignments DeviceAssignment[]
+  recommendations Recommendation[]
+  outcomes       Outcome[]
+
+  @@unique([farmId, id])
+  @@unique([farmId, name])
+  @@index([farmId])
+}
+
+model Season {
+  id                String              @id @default(cuid())
+  farmId            String
+  plotId            String
+  name              String              @db.VarChar(120)
+  farmingMethod     FarmingMethod       @default(NOT_RECORDED)
+  status            SeasonStatus        @default(PLANNING)
+  startsAt          DateTime?
+  endsAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  farm              Farm                @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot              Plot                @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: Cascade)
+  crops             SeasonCrop[]
+  requirement       SeasonRequirement?
+  soilReadings      SoilReading[]
+  recommendations   Recommendation[]
+  outcomes          Outcome[]
+
+  @@unique([farmId, plotId, name])
+  @@unique([farmId, plotId, id])
+  @@index([farmId, status])
+  @@index([plotId, startsAt])
+}
+
+model SeasonCrop {
+  id        String         @id @default(cuid())
+  seasonId  String
+  name      String         @db.VarChar(120)
+  recordType CropRecordType
+  notes     String?        @db.Text
+  createdAt DateTime       @default(now())
+  season    Season         @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([seasonId, name, recordType])
+  @@index([name])
+}
+
+model SeasonRequirement {
+  id                 String        @id @default(cuid())
+  seasonId           String        @unique
+  intendedCrops      String[]      @default([])
+  availableCrops     String[]      @default([])
+  marketableCrops    String[]      @default([])
+  preferredMethod   FarmingMethod?
+  otherRequirements Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  season             Season        @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+}
+
+model Device {
+  id             String           @id @default(cuid())
+  deviceCode     String           @unique @db.VarChar(100)
+  type           String           @db.VarChar(80)
+  status         DeviceStatus     @default(ACTIVE)
+  ownership      DeviceOwnership  @default(CROPCYCLE)
+  firmware       String?          @db.VarChar(80)
+  registeredById String?
+  farmId         String?
+  plotId         String?
+  lastConnectedAt DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  registeredBy   User?            @relation("DeviceRegistrar", fields: [registeredById], references: [id], onDelete: SetNull)
+  farm           Farm?            @relation(fields: [farmId], references: [id], onDelete: SetNull)
+  plot           Plot?            @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: SetNull)
+  assignments    DeviceAssignment[]
+  readings       SoilReading[]
+
+  @@index([farmId, plotId, status])
+}
+
+model DeviceAssignment {
+  id         String    @id @default(cuid())
+  deviceId   String
+  farmId     String
+  plotId     String?
+  assignedAt DateTime  @default(now())
+  releasedAt DateTime?
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  farm       Farm      @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot       Plot?     @relation(fields: [plotId], references: [id], onDelete: SetNull)
+
+  @@index([deviceId, releasedAt])
+  @@index([farmId, plotId, releasedAt])
+}
+
+model SoilReading {
+  id             String     @id @default(cuid())
+  idempotencyKey String     @unique @db.VarChar(100)
+  farmerId       String
+  farmId         String
+  plotId         String
+  seasonId       String
+  deviceId       String?
+  recordedAt     DateTime   @default(now())
+  moisture       Decimal?   @db.Decimal(8, 3)
+  pH             Decimal?   @db.Decimal(5, 3)
+  nitrogen       Decimal?   @db.Decimal(10, 3)
+  phosphorus     Decimal?   @db.Decimal(10, 3)
+  potassium      Decimal?   @db.Decimal(10, 3)
+  soilTemperature Decimal?  @db.Decimal(7, 3)
+  humidity       Decimal?   @db.Decimal(7, 3)
+  sensorValues   Json?
+  syncStatus     SyncStatus @default(SYNCED)
+  confirmedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  farmer         Farmer     @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  farm           Farm       @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot           Plot       @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: Cascade)
+  season         Season     @relation(fields: [farmId, plotId, seasonId], references: [farmId, plotId, id], onDelete: Cascade)
+  device         Device?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([farmerId, recordedAt])
+  @@index([farmId, plotId, recordedAt])
+  @@index([seasonId, recordedAt])
+  @@index([syncStatus, createdAt])
+}
+
+model KnowledgeRule {
+  id            String          @id @default(cuid())
+  key           String          @db.VarChar(120)
+  version       Int
+  title         String          @db.VarChar(200)
+  body           Json
+  sourceCitation String          @db.Text
+  status         KnowledgeStatus @default(DRAFT)
+  createdById    String
+  approvedById   String?
+  approvedAt     DateTime?
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  createdBy      User            @relation("KnowledgeAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy     User?           @relation("KnowledgeApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  recommendations RecommendationKnowledgeRule[]
+
+  @@unique([key, version])
+  @@index([status, effectiveFrom, effectiveTo])
+}
+
+model Recommendation {
+  id               String            @id @default(cuid())
+  farmerId         String
+  farmId           String
+  plotId           String
+  seasonId         String
+  version          Int               @default(1)
+  status           RecommendationStatus @default(NEEDS_REVIEW)
+  result           Json
+  inputSnapshot    Json
+  provider         String?           @db.VarChar(100)
+  modelVersion     String?           @db.VarChar(100)
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  farmer           Farmer            @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  farm             Farm              @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot             Plot              @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: Cascade)
+  season           Season            @relation(fields: [farmId, plotId, seasonId], references: [farmId, plotId, id], onDelete: Cascade)
+  reviewedBy       User?             @relation("RecommendationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  knowledgeRules   RecommendationKnowledgeRule[]
+  outcomes         Outcome[]
+  feedback         Feedback[]
+
+  @@unique([seasonId, version])
+  @@index([farmerId, createdAt])
+  @@index([farmId, plotId, createdAt])
+  @@index([status, createdAt])
+}
+
+model RecommendationKnowledgeRule {
+  recommendationId String
+  knowledgeRuleId  String
+  recommendation   Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  knowledgeRule    KnowledgeRule  @relation(fields: [knowledgeRuleId], references: [id], onDelete: Restrict)
+
+  @@id([recommendationId, knowledgeRuleId])
+}
+
+model Outcome {
+  id                 String           @id @default(cuid())
+  farmerId           String
+  farmId             String
+  plotId             String
+  seasonId           String
+  recommendationId   String?
+  actualCrops        String[]         @default([])
+  yieldQuantity      Decimal?          @db.Decimal(12, 3)
+  yieldUnit          String?            @db.VarChar(40)
+  notes              String?            @db.Text
+  recordedAt         DateTime           @default(now())
+  farmer             Farmer             @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  farm               Farm               @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot               Plot               @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: Cascade)
+  season             Season             @relation(fields: [farmId, plotId, seasonId], references: [farmId, plotId, id], onDelete: Cascade)
+  recommendation     Recommendation?    @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
+  feedback           Feedback[]
+
+  @@index([farmerId, recordedAt])
+  @@index([seasonId])
+}
+
+model Feedback {
+  id               String           @id @default(cuid())
+  farmerId         String
+  recommendationId String?
+  outcomeId        String?
+  recordedById     String?
+  rating           Int?
+  comment          String?          @db.Text
+  createdAt        DateTime         @default(now())
+  farmer           Farmer           @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  recommendation   Recommendation?  @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
+  outcome          Outcome?         @relation(fields: [outcomeId], references: [id], onDelete: SetNull)
+  recordedBy       User?            @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([farmerId, createdAt])
+  @@index([recommendationId])
+}
