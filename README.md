@@ -16,6 +16,12 @@ npm run dev
 
 Open http://localhost:3000. The Compose file starts PostgreSQL with a persistent local Docker volume. `.env.example` is for local development only; replace those credentials outside this environment.
 
+## Database deployment
+
+Set both `DATABASE_URL` and `DIRECT_URL` in `.env`. For local PostgreSQL, both can use the same local connection string. For Neon, use its pooled connection string for `DATABASE_URL` and its direct (unpooled) connection string for `DIRECT_URL`. Keep real connection strings in environment variables or ignored `.env` files; never commit them.
+
+Before the first deployment, temporarily set the Neon URLs in your local `.env` and run `npm run db:deploy` to create the tables in Neon. Then set the same two values in Vercel under Project Settings → Environment Variables. Run `npm run db:deploy` again whenever you add a migration. `npm run db:generate` runs automatically after dependency installation.
+
 The schema is in `prisma/schema.prisma`; `registerFarmer` in `src/lib/farmers.ts` allocates the permanent farmer code in the same database transaction that creates the farmer.
 
 ## Included in this prototype
