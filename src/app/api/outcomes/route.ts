@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, validationError } from "@/lib/api";
+import { cropOptionsError, parseCropSelections } from "@/lib/crops";
 import { requireSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { farmWhere, hasFarmPermission } from "@/lib/workspace";
-
-function cropNames(value: unknown): string[] | null {
-  const values = typeof value === "string" ? value.split(",") : value;
-  if (!Array.isArray(values) || values.length === 0 || values.length > 20) return null;
-  const names = values.map((crop) => typeof crop === "string" ? crop.trim() : "");
-  if (names.some((crop) => !crop || crop.length > 120)) return null;
-  return [...new Set(names)];
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,9 +17,9 @@ export async function POST(request: NextRequest) {
     if (typeof input.seasonId !== "string" || !input.seasonId.trim()) {
       return validationError("Choose the season this outcome belongs to.");
     }
-    const actualCrops = cropNames(input.actualCrops);
-    if (!actualCrops) {
-      return validationError("Enter between 1 and 20 crop names, each no longer than 120 characters.");
+    const actualCrops = parseCropSelections(input.actualCrops);
+    if (!actualCrops?.length) {
+      return validationError(cropOptionsError());
     }
 
     const yieldQuantity = input.yieldQuantity;

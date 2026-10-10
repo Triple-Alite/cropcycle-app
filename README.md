@@ -33,6 +33,7 @@ The schema is in `prisma/schema.prisma`; `registerFarmer` in `src/lib/farmers.ts
 - Workspace overview for farmers, farms, plots, active seasons and soil readings.
 - Add-farm, add-plot, start-season and record-reading flows linked to registered records.
 - Previous/intended crops, crops available, market crops and mono-cropping/mixed-farming fields.
+- Farmer crop selections are limited to Yam, Maize, Beans, Guinea Corn, Rice, Groundnut, Soya Beans, Tomatoes, Pepper, Millet, Okro, Bambara nut, Cassava, Spinach, Hibiscus, Potatoes, Sheanut, Sesame, Sugarcane, Gardenegg and Onions; season, outcome and agricultural-knowledge APIs enforce this same list.
 - Soil readings for nitrogen, phosphorus, potassium (ppm), soil temperature (°C) and humidity (%).
 - Server-backed, versioned recommendation history with scientist review and sharing.
 - Outcome capture for actual planted crops, optional yield, notes and recommendation feedback; actual crops carry into later seasons.

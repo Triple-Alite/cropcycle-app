@@ -1,14 +1,10 @@
 import { CropRecordType, Prisma, SeasonStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, validationError } from "@/lib/api";
+import { cropOptionsError, parseCropSelections } from "@/lib/crops";
 import { requireSessionUser } from "@/lib/auth";
 import { farmWhere, farmingMethod, farmingMethodLabel, hasFarmPermission, isFarmingMethod } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
-
-function stringList(value: unknown) {
-  if (typeof value !== "string") return [];
-  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))].slice(0, 40);
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,7 +28,15 @@ export async function POST(request: NextRequest) {
       return validationError("You do not have permission to manage seasons on this farm.", 403);
     }
 
-    const previous = stringList(input.previousCrops);
+    const selectedPrevious = parseCropSelections(input.previousCrops ?? []);
+    const intended = parseCropSelections(input.intendedCrops ?? []);
+    const available = parseCropSelections(input.available ?? []);
+    const marketable = parseCropSelections(input.market ?? []);
+    if (!selectedPrevious || !intended || !available || !marketable) {
+      return validationError(cropOptionsError());
+    }
+
+    const previous = selectedPrevious;
     if (!previous.length) {
       const recentSeasons = await prisma.season.findMany({
         where: { farmId: plot.farmId, plotId: plot.id },
@@ -46,9 +50,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    const intended = stringList(input.intendedCrops);
-    const available = stringList(input.available);
-    const marketable = stringList(input.market);
     const allCrops = [
       ...previous.map((name) => ({ name, recordType: CropRecordType.PREVIOUS })),
       ...intended.map((name) => ({ name, recordType: CropRecordType.INTENDED })),

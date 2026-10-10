@@ -1,4 +1,5 @@
 import { FarmingMethod, Prisma } from "@prisma/client";
+import { canonicalCropName, CROP_OPTIONS } from "@/lib/crops";
 
 export type ValueRange = {
   min?: number;
@@ -61,8 +62,8 @@ export function parseKnowledgeBody(value: unknown):
   | { ok: true; body: StructuredKnowledgeBody; json: Prisma.InputJsonObject }
   | { ok: false; error: string } {
   if (!isRecord(value)) return { ok: false, error: "Knowledge body must be a JSON object." };
-  if (typeof value.crop !== "string" || value.crop.trim().length < 1 || value.crop.trim().length > 120) {
-    return { ok: false, error: "Knowledge must identify one crop." };
+  if (typeof value.crop !== "string" || !canonicalCropName(value.crop)) {
+    return { ok: false, error: `Knowledge crop must be one of: ${CROP_OPTIONS.join(", ")}.` };
   }
   if (value.region !== undefined &&
       (typeof value.region !== "string" || value.region.trim().length < 2 || value.region.length > 160)) {
@@ -76,6 +77,11 @@ export function parseKnowledgeBody(value: unknown):
       ok: false,
       error: "Provide non-empty reasons and considerations, and valid optional crop lists (up to 20 items each).",
     };
+  }
+  const alternatives = (value.alternatives as string[] | undefined) ?? [];
+  const avoidAfter = (value.avoidAfter as string[] | undefined) ?? [];
+  if ([...alternatives, ...avoidAfter].some((crop) => !canonicalCropName(crop))) {
+    return { ok: false, error: `Alternative and avoid-after crops must be selected from: ${CROP_OPTIONS.join(", ")}.` };
   }
 
   let farmingMethods: FarmingMethod[] | undefined;
@@ -112,11 +118,11 @@ export function parseKnowledgeBody(value: unknown):
   }
 
   const body: StructuredKnowledgeBody = {
-    crop: value.crop.trim(),
+    crop: canonicalCropName(value.crop)!,
     reasons: (value.reasons as string[]).map((item) => item.trim()),
     considerations: (value.considerations as string[]).map((item) => item.trim()),
-    alternatives: (value.alternatives as string[] | undefined)?.map((item) => item.trim()) ?? [],
-    avoidAfter: (value.avoidAfter as string[] | undefined)?.map((item) => item.trim()) ?? [],
+    alternatives: alternatives.map((item) => canonicalCropName(item)!),
+    avoidAfter: avoidAfter.map((item) => canonicalCropName(item)!),
   };
   if (value.region !== undefined) body.region = (value.region as string).trim();
   if (farmingMethods) body.farmingMethods = farmingMethods;
