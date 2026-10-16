@@ -6,29 +6,31 @@ export function isAdministrator(user: SessionUser) {
   return user.role === UserRole.ADMIN;
 }
 
+function normalizeFarmingMethod(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "not-recorded";
+  if (value === FarmingMethod.MONO_CROPPING) return "mono-cropping";
+  if (value === FarmingMethod.MIXED_FARMING) return "mixed-farming";
+  if (value === FarmingMethod.NOT_RECORDED) return "not-recorded";
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!normalized) return "not-recorded";
+  if (normalized === "mono cropping" || normalized === "monocropping") return "mono-cropping";
+  if (normalized === "mixed farming" || normalized === "mixedfarming") return "mixed-farming";
+  if (normalized === "not recorded" || normalized === "notrecorded") return "not-recorded";
+  return normalized;
+}
+
 export function farmingMethod(value: unknown): FarmingMethod {
-  if (value === "Mono-cropping" || value === FarmingMethod.MONO_CROPPING) {
-    return FarmingMethod.MONO_CROPPING;
-  }
-  if (value === "Mixed farming" || value === FarmingMethod.MIXED_FARMING) {
-    return FarmingMethod.MIXED_FARMING;
-  }
-  if (value === undefined || value === null || value === "" || value === "Not recorded" || value === FarmingMethod.NOT_RECORDED) {
-    return FarmingMethod.NOT_RECORDED;
-  }
+  const normalized = normalizeFarmingMethod(value);
+  if (normalized === "mono-cropping") return FarmingMethod.MONO_CROPPING;
+  if (normalized === "mixed-farming") return FarmingMethod.MIXED_FARMING;
+  if (normalized === "not-recorded") return FarmingMethod.NOT_RECORDED;
   throw new Error("Farming method is invalid.");
 }
 
 export function isFarmingMethod(value: unknown) {
-  return value === undefined ||
-    value === null ||
-    value === "" ||
-    value === "Not recorded" ||
-    value === FarmingMethod.NOT_RECORDED ||
-    value === "Mono-cropping" ||
-    value === FarmingMethod.MONO_CROPPING ||
-    value === "Mixed farming" ||
-    value === FarmingMethod.MIXED_FARMING;
+  const normalized = normalizeFarmingMethod(value);
+  return normalized === "not-recorded" || normalized === "mono-cropping" || normalized === "mixed-farming";
 }
 
 export function farmingMethodLabel(value: FarmingMethod) {

@@ -29,9 +29,11 @@ The schema is in `prisma/schema.prisma`; `registerFarmer` in `src/lib/farmers.ts
 - Public landing page and sign-up, login and password-reset interaction screens.
 - Role selection for Admin, Field Agent, Crop Scientist, Farm Manager and Farmer.
 - Farmer registration, search and editing with stable AGR-F identifiers.
-- Farm ownership, generated plot records, plot locations and optional GPS coordinates.
-- Workspace overview for farmers, farms, plots, active seasons and soil readings.
-- Add-farm, add-plot, start-season and record-reading flows linked to registered records.
+- Farm ownership with one Farms page; optional fields/plots are managed inside their farm and can have locations and GPS coordinates.
+- Workspace overview for farmers, farms, active seasons and soil readings.
+- Add-farm, add-field, start-season and record-reading flows linked to registered records.
+- Farmer and field-agent service requests with farm-scoped visit status and schedule visibility; CropCycle administrators handle visit scheduling, staff assignment, device linkage, and operations notes.
+- Admin-only device operations for registering service devices, recording ownership and firmware, assigning or releasing devices to farms and fields, and tracking active, inactive, maintenance, or retired status.
 - Previous/intended crops, crops available, market crops and mono-cropping/mixed-farming fields.
 - Farmer crop selections are limited to Yam, Maize, Beans, Guinea Corn, Rice, Groundnut, Soya Beans, Tomatoes, Pepper, Millet, Okro, Bambara nut, Cassava, Spinach, Hibiscus, Potatoes, Sheanut, Sesame, Sugarcane, Gardenegg and Onions; season, outcome and agricultural-knowledge APIs enforce this same list.
 - Soil readings for nitrogen, phosphorus, potassium (ppm), soil temperature (°C) and humidity (%).
@@ -45,6 +47,8 @@ The schema is in `prisma/schema.prisma`; `registerFarmer` in `src/lib/farmers.ts
 
 Production deployment still requires environment-specific security review, database backup/operations, email delivery configuration, and end-to-end validation against the target PostgreSQL instance. Offline readings are held in browser localStorage until batch sync succeeds; conflicting IDs are retained for a user to retry or discard. Agricultural recommendations remain constrained to approved, cited knowledge and require scientist review before sharing.
 
+Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RESET_EMAIL_API_KEY`, and the public HTTPS base URL in `CROPCYCLE_APP_URL`. The email endpoint must accept a bearer-authenticated `POST` with the recipient, the `cropcycle-password-reset` template name, and a `resetUrl` in its template data. For account privacy, reset requests return the same generic response whether or not an account exists; email delivery failures are recorded in the server logs.
+
 Apply the Prisma schema before exercising database-backed workflows. Run migrations and validate signup/login, farm and season access controls, outcome capture, recommendation history, and reading synchronization against the configured PostgreSQL database. The browser queue is device-local and is not a substitute for server backup.
 
 The soil reading API and Crop Scientist rule criteria use the same five parameters: nitrogen, phosphorus and potassium in ppm; soil temperature in °C; and humidity in percent. The UI uses Montserrat with the primary brand colors `#CCF863`, `#00410B` and `#FFFFFF`.
@@ -52,3 +56,5 @@ The soil reading API and Crop Scientist rule criteria use the same five paramete
 ## Architecture direction
 
 Keep agricultural knowledge separate from recommendation orchestration and AI-provider adapters. Persist farmer, farm, plot, season, crop history, requirements, soil-reading, device, recommendation, outcome and feedback records with explicit ownership relationships. Keep localization strings outside workflow logic when adding Hausa, Yoruba and Igbo.
+
+Service visits are farm-linked records: farmers and field agents can request and view visits for farms available in their workspace, while administrators control scheduling, staff assignments, device links, visit status and internal notes. Device registration and assignment are restricted to administrators and remain separate from farmer farm management.

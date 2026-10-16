@@ -18,7 +18,7 @@ export async function GET() {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-    const [farmers, farms, plots, seasons, readings, recommendations, outcomes] = await Promise.all([
+    const [farmers, farms, plots, seasons, readings, recommendations, outcomes, serviceVisits] = await Promise.all([
       prisma.farmer.findMany({
         where: farmerWhere(user),
         select: {
@@ -78,6 +78,18 @@ export async function GET() {
         },
         orderBy: { recordedAt: "desc" },
         take: 50,
+      }),
+      prisma.serviceVisit.findMany({
+        where: { farm: farmWhere(user) },
+        include: {
+          farm: { select: { farmCode: true, name: true } },
+          plot: { select: { plotCode: true, name: true } },
+          device: { select: { deviceCode: true } },
+          requestedBy: { select: { name: true } },
+          assignedTo: { select: { id: true, name: true } },
+        },
+        orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
+        take: 200,
       }),
     ]);
 
@@ -180,6 +192,24 @@ export async function GET() {
         notes: outcome.notes,
         recordedAt: outcome.recordedAt.toISOString(),
         feedback: outcome.feedback,
+      })),
+      serviceVisits: serviceVisits.map((visit) => ({
+        id: visit.id,
+        serviceType: visit.serviceType,
+        description: visit.description,
+        status: visit.status,
+        scheduledAt: visit.scheduledAt?.toISOString() ?? null,
+        completedAt: visit.completedAt?.toISOString() ?? null,
+        operationsNotes: visit.operationsNotes ?? "",
+        createdAt: visit.createdAt.toISOString(),
+        farmId: visit.farm.farmCode,
+        farm: visit.farm.name,
+        plotId: visit.plot?.plotCode ?? null,
+        plot: visit.plot?.name ?? "",
+        deviceCode: visit.device?.deviceCode ?? "",
+        requestedBy: visit.requestedBy.name,
+        assignedToId: visit.assignedTo?.id ?? "",
+        assignedTo: visit.assignedTo?.name ?? "",
       })),
     });
   } catch (error) {

@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
       return validationError("You do not have permission to manage seasons on this farm.", 403);
     }
 
-    const selectedPrevious = parseCropSelections(input.previousCrops ?? []);
-    const intended = parseCropSelections(input.intendedCrops ?? []);
+    const selectedPrevious = parseCropSelections(input.previousCrops ?? input.previousSeason ?? []);
+    const intended = parseCropSelections(input.preferredCrops ?? input.intendedCrops ?? []);
     const available = parseCropSelections(input.available ?? []);
     const marketable = parseCropSelections(input.market ?? []);
     if (!selectedPrevious || !intended || !available || !marketable) {

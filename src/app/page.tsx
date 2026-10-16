@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CROP_OPTIONS } from "@/lib/crops";
+import PasswordVisibilityToggle from "@/components/password-visibility-toggle";
+import { DeviceManagementWorkspace, ServiceVisitsWorkspace } from "@/components/service-workspaces";
 
 type Role = "Admin" | "Field Agent" | "Crop Scientist" | "Farm Manager" | "Farmer";
 type Farmer = { id: string; name: string; phone: string; location: string; farming: string };
@@ -36,6 +38,24 @@ type Outcome = {
   notes: string | null;
   recordedAt: string;
   feedback: Array<{ rating: number | null; comment: string | null }>;
+};
+type ServiceVisit = {
+  id: string;
+  serviceType: string;
+  description: string;
+  status: "REQUESTED" | "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  scheduledAt: string | null;
+  completedAt: string | null;
+  operationsNotes: string;
+  createdAt: string;
+  farmId: string;
+  farm: string;
+  plotId: string | null;
+  plot: string;
+  deviceCode: string;
+  requestedBy: string;
+  assignedToId: string;
+  assignedTo: string;
 };
 type RecommendationResult = {
   notice: string;
@@ -84,9 +104,9 @@ type KnowledgeRuleRecord = {
   effectiveTo: string | null;
   approvedAt: string | null;
 };
-type View = "overview" | "farmers" | "farms" | "plots" | "seasons" | "soil" | "recommendations" | "knowledge";
+type View = "overview" | "farmers" | "farms" | "seasons" | "soil" | "recommendations" | "knowledge" | "serviceVisits" | "devices";
 type Modal = "farmer" | "farm" | "plot" | "season" | "reading" | "outcome" | null;
-type Store = { farmers: Farmer[]; farms: Farm[]; plots: Plot[]; seasons: Season[]; readings: Reading[]; recommendations: SavedRecommendation[]; outcomes: Outcome[]; farmer: string; role: Role };
+type Store = { farmers: Farmer[]; farms: Farm[]; plots: Plot[]; seasons: Season[]; readings: Reading[]; recommendations: SavedRecommendation[]; outcomes: Outcome[]; serviceVisits: ServiceVisit[]; farmer: string; role: Role };
 const seed: Store = {
   farmer: "Amina Yusuf", role: "Field Agent",
   farmers: [{ id: "AGR-F-000001", name: "Amina Yusuf", phone: "+234 803 000 1280", location: "Kaduna North, Kaduna", farming: "Mixed farming" }, { id: "AGR-F-000002", name: "Musa Ibrahim", phone: "+234 806 000 9200", location: "Zaria, Kaduna", farming: "Mono-cropping" }],
@@ -96,8 +116,9 @@ const seed: Store = {
   readings: [],
   recommendations: [],
   outcomes: [],
+  serviceVisits: [],
 };
-const navigation: { id: View; name: string; icon: string }[] = [{ id: "overview", name: "Overview", icon: "◫" }, { id: "farmers", name: "Farmers", icon: "♙" }, { id: "farms", name: "Farms", icon: "⌂" }, { id: "plots", name: "Plots", icon: "▦" }, { id: "seasons", name: "Seasons", icon: "◷" }, { id: "soil", name: "Soil readings", icon: "⌁" }, { id: "recommendations", name: "Recommendations", icon: "✳" }, { id: "knowledge", name: "Agricultural knowledge", icon: "✳" }];
+const navigation: { id: View; name: string; icon: string }[] = [{ id: "overview", name: "Overview", icon: "◫" }, { id: "farmers", name: "Farmers", icon: "♙" }, { id: "farms", name: "Farms", icon: "⌂" }, { id: "seasons", name: "Seasons", icon: "◷" }, { id: "soil", name: "Soil readings", icon: "⌁" }, { id: "serviceVisits", name: "Service visits", icon: "⚒" }, { id: "recommendations", name: "Recommendations", icon: "✳" }, { id: "knowledge", name: "Agricultural knowledge", icon: "✳" }, { id: "devices", name: "Device operations", icon: "▣" }];
 
 function subscribeToOnlineStatus(onChange: () => void) {
   window.addEventListener("online", onChange);
@@ -202,6 +223,7 @@ export default function Home() {
   const [auth, setAuth] = useState<"login" | "signup" | "reset" | null>(null);
   const [view, setView] = useState<View>("overview");
   const [modal, setModal] = useState<Modal>(null);
+  const [plotFarmId, setPlotFarmId] = useState("");
   const [farmerDraft, setFarmerDraft] = useState<Farmer | null>(null);
   const [selectedOutcomeSeasonId, setSelectedOutcomeSeasonId] = useState("");
   const [notice, setNotice] = useState("");
@@ -366,12 +388,11 @@ export default function Home() {
           name: String(data.get("name")).trim(),
           location: String(data.get("location")).trim(),
           area: Number(data.get("area")),
-          plotCount: Number(data.get("plots")),
         }),
       });
       await refreshWorkspace();
       setModal(null);
-      setNotice("Farm and its plot records were added.");
+      setNotice("Farm added. You can add its fields from the farm page.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to save farm.");
     }
@@ -428,6 +449,16 @@ export default function Home() {
     event.preventDefault(); const data = new FormData(event.currentTarget);
     const plot = store.plots.find((record) => record.id === String(data.get("plotId")));
     if (!plot) { setNotice("Choose a registered plot for this season."); return; }
+    const previousSeasonText = String(data.get("previousSeason") ?? "").trim();
+    const previousCrops = previousSeasonText
+      ? previousSeasonText
+          .split(/[\n,]+/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
+    const preferredCrops = data.getAll("preferredCrops").map(String);
+    const available = data.getAll("available").map(String);
+    const market = data.getAll("market").map(String);
     try {
       await requestJson("/api/seasons", {
         method: "POST",
@@ -435,10 +466,13 @@ export default function Home() {
           plotCode: plot.id,
           name: String(data.get("name")).trim(),
           method: String(data.get("method")),
-          intendedCrops: data.getAll("crop").map(String),
-          previousCrops: data.getAll("previousCrops").map(String),
-          available: data.getAll("available").map(String),
-          market: data.getAll("market").map(String),
+          preferredMethod: String(data.get("preferredMethod")),
+          preferredCrops,
+          intendedCrops: preferredCrops,
+          previousSeason: previousSeasonText,
+          previousCrops,
+          available,
+          market,
         }),
       });
       await refreshWorkspace();
@@ -552,18 +586,19 @@ export default function Home() {
   const failedQueueCount = queuedReadings.filter((reading) => reading.syncStatus === "FAILED").length;
   if (!signedIn) return <><Landing onAuth={setAuth} />{auth && <AuthDialog mode={auth} onModeChange={setAuth} onClose={() => setAuth(null)} onSubmit={saveAuth} />}{notice && <Toast>{notice}</Toast>}</>;
   return <div className="app-shell">
-    <aside className="sidebar"><button className="brand-lockup" onClick={() => setView("overview")}><span className="brand-mark">c</span><span className="brand-name">cropcycle<span>.</span></span></button><div className="workspace-label">WORKSPACE</div><div className="workspace-switch"><span className="workspace-avatar">{initials(store.farms[0]?.name ?? store.farmer)}</span><span><strong>{store.farms[0]?.name ?? "My workspace"}</strong><small>{store.farms[0]?.location ?? store.role}</small></span><span className="switch-caret">⌄</span></div><nav className="side-nav" aria-label="Workspace navigation">{navigation.filter((item) => item.id !== "knowledge" || store.role === "Admin" || store.role === "Crop Scientist").map((item) => <button key={item.id} className={`nav-item ${view === item.id ? "selected" : ""}`} onClick={() => setView(item.id)}><span className="nav-glyph">{item.icon}</span>{item.name}{item.id === "soil" && (store.readings.some((reading) => reading.sync !== "Synced") || queuedReadings.length > 0) && <span className="nav-count">{queuedReadings.length || 1}</span>}</button>)}</nav><div className="sidebar-spacer"/><div className="field-tip"><span className="tip-sprout">✳</span><strong>In the field?</strong><p>Capture readings offline; they’ll sync when connectivity returns.</p><span className="tip-link">{offline ? "Offline · queue enabled" : "Server synced"} <i className={offline ? "" : "online-dot"}/></span></div><button className="sidebar-link" onClick={() => setNotice("Help centre is being prepared for your team.")}>◌ <span>Help & support</span></button><button className="profile-row" onClick={logout}><span className="profile-avatar">{initials(store.farmer)}</span><span className="profile-copy"><strong>{store.farmer}</strong><small>{store.role}</small></span><span className="profile-menu">···</span></button></aside>
+    <aside className="sidebar"><button className="brand-lockup" onClick={() => setView("overview")}><span className="brand-mark">c</span><span className="brand-name">cropcycle<span>.</span></span></button><div className="workspace-label">WORKSPACE</div><div className="workspace-switch"><span className="workspace-avatar">{initials(store.farms[0]?.name ?? store.farmer)}</span><span><strong>{store.farms[0]?.name ?? "My workspace"}</strong><small>{store.farms[0]?.location ?? store.role}</small></span><span className="switch-caret">⌄</span></div><nav className="side-nav" aria-label="Workspace navigation">{navigation.filter((item) => (item.id !== "knowledge" || store.role === "Admin" || store.role === "Crop Scientist") && (item.id !== "devices" || store.role === "Admin") && (item.id !== "serviceVisits" || store.role !== "Crop Scientist")).map((item) => <button key={item.id} className={`nav-item ${view === item.id ? "selected" : ""}`} onClick={() => setView(item.id)}><span className="nav-glyph">{item.icon}</span>{item.name}{item.id === "soil" && (store.readings.some((reading) => reading.sync !== "Synced") || queuedReadings.length > 0) && <span className="nav-count">{queuedReadings.length || 1}</span>}</button>)}</nav><div className="sidebar-spacer"/><div className="field-tip"><span className="tip-sprout">✳</span><strong>In the field?</strong><p>Capture readings offline; they’ll sync when connectivity returns.</p><span className="tip-link">{offline ? "Offline · queue enabled" : "Server synced"} <i className={offline ? "" : "online-dot"}/></span></div><button className="sidebar-link" onClick={() => setNotice("Help centre is being prepared for your team.")}>◌ <span>Help & support</span></button><button className="profile-row" onClick={logout}><span className="profile-avatar">{initials(store.farmer)}</span><span className="profile-copy"><strong>{store.farmer}</strong><small>{store.role}</small></span><span className="profile-menu">···</span></button></aside>
     <main className="workspace-main"><header className="topbar"><div className="breadcrumb"><span>Workspace</span><span className="crumb-divider">/</span><strong>{navigation.find((item) => item.id === view)?.name}</strong></div><div className="topbar-actions"><span className={`connection-pill ${offline || conflictQueueCount || failedQueueCount ? "is-offline" : ""}`}><i/>{offline ? `Offline · ${queuedReadings.length} queued` : conflictQueueCount ? `${conflictQueueCount} conflict(s) need review` : failedQueueCount ? `${failedQueueCount} sync failure(s)` : pendingQueueCount ? `${pendingQueueCount} pending sync` : "All changes saved"}</span><button className="icon-button" aria-label="Notifications" onClick={() => setNotice("You’re all caught up.")}>♧<i className="notification-dot"/></button><button className="top-avatar" onClick={logout} aria-label="Log out">{initials(store.farmer)}</button></div></header><div className="page-content">
       {view === "overview" && <Overview store={store} setView={setView} setModal={setModal}/>}
       {view === "farmers" && <Farmers farmers={store.farmers} canRegister={store.role === "Admin" || store.role === "Field Agent"} canEdit={store.role === "Admin" || store.role === "Field Agent" || store.role === "Farmer"} onNew={() => { setFarmerDraft(null); setModal("farmer"); }} onEdit={(farmer) => { setFarmerDraft(farmer); setModal("farmer"); }}/ >}
-      {view === "farms" && <Farms farms={farms} total={store.farms.length} query={query} setQuery={setQuery} setModal={setModal} seasons={store.seasons}/>}
-      {view === "plots" && <Plots plots={store.plots} setModal={setModal}/>}
+      {view === "farms" && <Farms farms={farms} total={store.farms.length} query={query} setQuery={setQuery} plots={store.plots} setModal={setModal} seasons={store.seasons} onAddPlot={(farmId) => { setPlotFarmId(farmId); setModal("plot"); }}/>}
       {view === "seasons" && <Seasons seasons={store.seasons} setModal={setModal}/>}
       {view === "soil" && <Soil readings={store.readings} queuedReadings={queuedReadings} offline={offline} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
       {view === "recommendations" && <Recommendations seasons={store.seasons} recommendations={store.recommendations} outcomes={store.outcomes} canReview={store.role === "Admin" || store.role === "Crop Scientist"} setModal={setModal} onGenerate={generateRecommendation} onReview={reviewRecommendation} onRecordOutcome={startOutcome}/>}
+      {view === "serviceVisits" && store.role !== "Crop Scientist" && <ServiceVisitsWorkspace farms={store.farms} plots={store.plots} visits={store.serviceVisits} isAdmin={store.role === "Admin"} onRefresh={refreshWorkspace}/>}
+      {view === "devices" && store.role === "Admin" && <DeviceManagementWorkspace/>}
       {view === "knowledge" && (store.role === "Admin" || store.role === "Crop Scientist") && <KnowledgeLibrary setNotice={setNotice}/>}
     </div></main>
-    {modal && <DataDialog key={selectedOutcomeSeasonId} kind={modal} farms={store.farms} farmers={store.farmers} plots={store.plots} seasons={store.seasons} recommendations={store.recommendations} selectedOutcomeSeasonId={selectedOutcomeSeasonId} farmerRecord={farmerDraft} onClose={() => { setModal(null); setFarmerDraft(null); }} onFarmer={saveFarmer} onFarm={saveFarm} onPlot={savePlot} onSeason={saveSeason} onReading={saveReading} onOutcome={saveOutcome}/>}
+    {modal && <DataDialog key={selectedOutcomeSeasonId} kind={modal} farms={store.farms} farmers={store.farmers} plots={store.plots} seasons={store.seasons} recommendations={store.recommendations} selectedOutcomeSeasonId={selectedOutcomeSeasonId} initialFarmId={plotFarmId} farmerRecord={farmerDraft} onClose={() => { setModal(null); setFarmerDraft(null); }} onFarmer={saveFarmer} onFarm={saveFarm} onPlot={savePlot} onSeason={saveSeason} onReading={saveReading} onOutcome={saveOutcome}/>}
     {notice && <Toast>{notice}</Toast>}
     {queueState.error && <Toast>{queueState.error}</Toast>}
   </div>;
@@ -578,7 +613,48 @@ function Step({ number, title, body }: { number: string; title: string; body: st
 function AuthDialog({ mode, onModeChange, onClose, onSubmit }: { mode: "login" | "signup" | "reset"; onModeChange: (mode: "login" | "signup" | "reset" | null) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void> }) {
   const [visible, setVisible] = useState(false), [error, setError] = useState("");
   const title = mode === "signup" ? "Start with your farm." : mode === "reset" ? "Reset your password." : "Welcome back.";
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="modal-close" onClick={onClose} aria-label="Close">×</button><span className="brand-mark">c</span><div className="auth-kicker">CROPCYCLE WORKSPACE</div><h2 id="auth-title">{title}</h2><p className="auth-subtitle">{mode === "reset" ? "We’ll send a secure, one-time password reset link." : "Your farm’s story, all in one place."}</p><form className="auth-form" onSubmit={(event) => { const password = String(new FormData(event.currentTarget).get("password") ?? ""); if (mode === "signup" && password.length < 12) { event.preventDefault(); setError("Use at least 12 characters for your password."); return; } setError(""); void onSubmit(event); }}>{mode === "signup" && <label>Your name<input name="name" autoComplete="name" placeholder="e.g. Amina Yusuf" required/></label>}<label>Email address<input type="email" name="email" autoComplete="email" placeholder="you@example.com" required/></label>{mode !== "reset" && <label>Password<div className="password-field"><input type={visible ? "text" : "password"} name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength={mode === "signup" ? 12 : 1} placeholder={mode === "signup" ? "At least 12 characters" : "Your password"} required/><button type="button" onClick={() => setVisible(!visible)}>{visible ? "Hide" : "Show"}</button></div></label>}{mode === "signup" && <p className="auth-privacy">New accounts start as farmers. An administrator can grant team roles.</p>}{error && <div className="auth-message" role="alert">{error}</div>}<button className="button button-dark auth-submit">{mode === "signup" ? "Create workspace" : mode === "reset" ? "Send reset instructions" : "Log in"}<span>↗</span></button></form><div className="auth-switch">{mode === "login" ? <>New to CropCycle? <button onClick={() => { setError(""); onModeChange("signup"); }}>Create an account</button><button className="forgot-link" onClick={() => { setError(""); onModeChange("reset"); }}>Forgot password?</button></> : <button onClick={() => { setError(""); onModeChange("login"); }}>Back to log in</button>}</div><p className="auth-privacy">Secure sessions are stored on the server, not in your browser.</p></section></div>;
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        <span className="brand-mark" role="img" aria-label="CropCycle logo"/>
+        <div className="auth-kicker">CROPCYCLE WORKSPACE</div>
+        <h2 id="auth-title">{title}</h2>
+        <p className="auth-subtitle">{mode === "reset" ? "We’ll send a secure, one-time password reset link." : "Your farm’s story, all in one place."}</p>
+        <form className="auth-form" onSubmit={(event) => {
+          const password = String(new FormData(event.currentTarget).get("password") ?? "");
+          if (mode === "signup" && password.length < 12) {
+            event.preventDefault();
+            setError("Use at least 12 characters for your password.");
+            return;
+          }
+          setError("");
+          void onSubmit(event);
+        }}>
+          {mode === "signup" && <label>Your name<input name="name" autoComplete="name" placeholder="e.g. Amina Yusuf" required/></label>}
+          <label>Email address<input type="email" name="email" autoComplete="email" placeholder="you@example.com" required/></label>
+          {mode !== "reset" && (
+            <label>Password
+              <div className="password-field">
+                <input type={visible ? "text" : "password"} name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength={mode === "signup" ? 12 : 1} placeholder={mode === "signup" ? "At least 12 characters" : "Your password"} required/>
+                <PasswordVisibilityToggle visible={visible} onToggle={() => setVisible(!visible)}/>
+              </div>
+            </label>
+          )}
+          {mode === "signup" && <p className="auth-privacy">New accounts start as farmers. An administrator can grant team roles.</p>}
+          {error && <div className="auth-message" role="alert">{error}</div>}
+          <button className="button button-dark auth-submit">{mode === "signup" ? "Create workspace" : mode === "reset" ? "Send reset instructions" : "Log in"}<span>↗</span></button>
+        </form>
+        <div className="auth-switch">
+          {mode === "login" ? <>
+            New to CropCycle? <button onClick={() => { setError(""); onModeChange("signup"); }}>Create an account</button>
+            <button className="forgot-link" onClick={() => { setError(""); onModeChange("reset"); }}>Forgot password?</button>
+          </> : <button onClick={() => { setError(""); onModeChange("login"); }}>Back to log in</button>}
+        </div>
+        <p className="auth-privacy">Secure sessions are stored on the server, not in your browser.</p>
+      </section>
+    </div>
+  );
 }
 
 function Overview({ store, setView, setModal }: { store: Store; setView: (view: View) => void; setModal: (modal: Modal) => void }) {
@@ -591,17 +667,39 @@ function Metric({ label, value }: { label: string; value: string }) { return <di
 function measurement(value: number | null, unit: string) { return value === null ? "Not recorded" : `${value} ${unit}`; }
 function Badge({ text }: { text: string }) { return <span className={`status ${text === "Review due" ? "status-review" : text === "Completed" ? "status-complete" : "status-active"}`}>{text}</span>; }
 function SyncStatus({ value }: { value: string }) { return <span className={`sync-status ${value === "Synced" ? "" : "sync-pending"}`}><i/>{value}</span>; }
+function CropListField({ name, label, hint }: { name: string; label: string; hint?: string }) {
+  return <div className="crop-list-field"><div className="crop-list-header"><strong>{label}</strong>{hint && <small>{hint}</small>}</div><div className="crop-selector-grid" role="group" aria-label={label}>{CROP_OPTIONS.map((crop) => <label className="crop-option" key={crop}><input type="checkbox" name={name} value={crop}/><span>{crop}</span></label>)}</div></div>;
+}
 
 function Farmers({ farmers, canRegister, canEdit, onNew, onEdit }: { farmers: Farmer[]; canRegister: boolean; canEdit: boolean; onNew: () => void; onEdit: (farmer: Farmer) => void }) {
   const [query, setQuery] = useState("");
   const filtered = farmers.filter((farmer) => `${farmer.id} ${farmer.name} ${farmer.phone} ${farmer.location}`.toLowerCase().includes(query.toLowerCase()));
   return <><div className="page-heading-row"><div><div className="date-eyebrow">PEOPLE · FARMER REGISTER</div><h1>Farmers</h1><p>Permanent farmer records connected to farms, seasons and field history.</p></div>{canRegister && <button className="button button-dark" onClick={onNew}>＋ Register farmer</button>}</div><section className="panel list-page-panel"><div className="panel-header list-toolbar"><div><div className="section-kicker">FARMER DIRECTORY</div><h2>{filtered.length} of {farmers.length} farmers</h2></div><label className="search-field"><span>⌕</span><input aria-label="Search farmers" placeholder="Search name, ID or location" value={query} onChange={(event) => setQuery(event.target.value)}/></label></div>{filtered.map((farmer) => <article className="farmer-row" key={farmer.id}><span className="profile-avatar">{initials(farmer.name)}</span><div className="farmer-main"><strong>{farmer.name}</strong><small>{farmer.id}</small></div><div className="farmer-contact"><small>PHONE</small><strong>{farmer.phone}</strong></div><div className="farmer-contact"><small>LOCATION</small><strong>{farmer.location}</strong></div><span className="method-tag">{farmer.farming}</span>{canEdit && <button className="quiet-link" onClick={() => onEdit(farmer)}>Edit</button>}</article>)}</section><Note text="Farmer IDs are assigned once at registration and remain attached to their record."/></>;
 }
-function Plots({ plots, setModal }: { plots: Plot[]; setModal: (modal: Modal) => void }) {
-  return <><PageTitle kicker="YOUR LAND · FIELD REGISTER" title="Plots" description="Track each field independently, with its own area and location." action="＋ Add a plot" onClick={() => setModal("plot")}/><section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">PLOT REGISTER</div><h2>{plots.length} plots</h2></div><span className="table-caption">FARM · LOCATION · AREA</span></div>{plots.map((plot,index) => <article className="plot-row" key={plot.id}><span className={`farm-large-mark mark-${index%3}`}>▦</span><div className="farm-card-main"><div className="farm-card-title"><h3>{plot.name}</h3><span className="status status-active">Active</span></div><p>{plot.farm} <span>·</span> {plot.id}</p><div className="farm-card-facts"><span>{plot.location}</span>{plot.latitude !== undefined && <span>{plot.latitude.toFixed(4)}, {plot.longitude?.toFixed(4)}</span>}</div></div><div className="plot-area"><strong>{plot.area}</strong><small>HECTARES</small></div></article>)}</section><Note text="GPS coordinates are stored when provided. Plot boundaries and mapped-area calculations are reserved for the mapping phase."/></>;
-}
-function Farms({ farms, total, query, setQuery, setModal, seasons }: { farms: Farm[]; total: number; query: string; setQuery: (value: string) => void; setModal: (modal: Modal) => void; seasons: Season[] }) {
-  return <><PageTitle kicker="YOUR LAND · FARM MANAGEMENT" title="Farms & plots" description="Keep every field, location and season connected." action="＋ Add a farm" onClick={() => setModal("farm")}/><section className="panel list-page-panel"><div className="panel-header list-toolbar"><div><div className="section-kicker">FARM REGISTER</div><h2>{total} farms</h2></div><label className="search-field"><span>⌕</span><input aria-label="Search farms" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search farms or locations"/></label></div>{farms.length ? farms.map((farm,index) => <article className="farm-card-row" key={farm.id}><span className={`farm-large-mark mark-${index%3}`}>⌂</span><div className="farm-card-main"><div className="farm-card-title"><h3>{farm.name}</h3><Badge text="Active"/></div><p>{farm.location} <span>·</span> {farm.id}</p><div className="farm-card-facts"><span><strong>{farm.area}</strong> hectares</span><span><strong>{farm.plots}</strong> plots</span><span><strong>{seasons.filter((season) => season.farm === farm.name).length}</strong> seasons</span></div></div><button className="button button-outline farm-quick-action" onClick={() => setModal("season")}>＋ Add season</button></article>) : <Empty title="No farms match that search" detail="Try another name or location." action="Clear search" onClick={() => setQuery("")}/>}</section><Note text="Farm boundaries and GPS coordinates can be attached as your mapping workflow is enabled."/></>;
+function Farms({ farms, total, query, setQuery, plots, setModal, seasons, onAddPlot }: { farms: Farm[]; total: number; query: string; setQuery: (value: string) => void; plots: Plot[]; setModal: (modal: Modal) => void; seasons: Season[]; onAddPlot: (farmId: string) => void }) {
+  return <><PageTitle kicker="YOUR LAND · FARM MANAGEMENT" title="Farms" description="Each farm keeps its fields, seasons and soil history together." action="＋ Add a farm" onClick={() => setModal("farm")}/><section className="panel list-page-panel"><div className="panel-header list-toolbar"><div><div className="section-kicker">FARM REGISTER</div><h2>{total} farms</h2></div><label className="search-field"><span>⌕</span><input aria-label="Search farms" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search farms or locations"/></label></div>{farms.length ? farms.map((farm,index) => {
+    const farmPlots = plots.filter((plot) => plot.farmId ? plot.farmId === farm.id : plot.farm === farm.name);
+    return <article className="farm-card-row" key={farm.id}>
+      <span className={`farm-large-mark mark-${index%3}`}>⌂</span>
+      <div className="farm-card-main">
+        <div className="farm-card-title"><h3>{farm.name}</h3><Badge text="Active"/></div>
+        <p>{farm.location} <span>·</span> {farm.id}</p>
+        <div className="farm-card-facts"><span><strong>{farm.area}</strong> hectares</span><span><strong>{farmPlots.length}</strong> fields</span><span><strong>{seasons.filter((season) => season.farm === farm.name).length}</strong> seasons</span></div>
+        <div className="farm-fields">
+          <div className="farm-fields-heading"><strong>Fields / plots</strong><button className="quiet-link" onClick={() => onAddPlot(farm.id)}>＋ Add field</button></div>
+          {farmPlots.length ? farmPlots.map((plot) => <div className="farm-field-row" key={plot.id}>
+            <span className="farm-field-icon">▦</span>
+            <strong>{plot.name}</strong>
+            <span>{plot.area} ha</span>
+            <small>{plot.location}</small>
+          </div>) : <p className="farm-fields-empty">No fields added yet. Add a field when the farm has separate areas to track.</p>}
+        </div>
+      </div>
+      <div className="farm-quick-actions">
+        <button className="button button-outline farm-quick-action" onClick={() => setModal("season")}>＋ Add season</button>
+      </div>
+    </article>;
+  }) : <Empty title="No farms match that search" detail="Try another name or location." action="Clear search" onClick={() => setQuery("")}/>}</section><Note text="A farm is the main record. Add fields / plots only when you need to track distinct areas separately."/></>;
 }
 function Seasons({ seasons, setModal }: { seasons: Season[]; setModal: (modal: Modal) => void }) {
   return <><PageTitle kicker="SEASONAL MEMORY · HISTORY THAT CARRIES FORWARD" title="Seasons" description="Past and present, recorded without overwriting what came before." action="＋ Start a season" onClick={() => setModal("season")}/><section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">ALL SEASONS</div><h2>{seasons.length} records</h2></div><span className="table-caption">FARM · PLOT · CROP · METHOD</span></div>{seasons.length ? seasons.map((season,index) => <article className="season-history-row" key={season.id}><span className={`history-number history-${index%3}`}>{String(seasons.length-index).padStart(2,"0")}</span><div className="history-main"><div className="season-title">{season.name}<Badge text={season.status}/></div><div className="season-meta">{season.farm}<span>·</span>{season.plot}</div></div><div className="history-crop"><small>CROP(S)</small><strong>{season.crop}</strong></div><div className="history-method"><small>METHOD</small><strong>{season.method}</strong></div><span className="history-id">{season.id}</span></article>) : <Empty title="Your season history starts here" detail="Create a season to record crops, farming methods and requirements." action="＋ Start a season" onClick={() => setModal("season")}/>}</section><Note text="New seasons can reuse previous crop history automatically. Each season keeps its own soil readings and requirements."/></>;
@@ -745,15 +843,15 @@ function PageTitle({ kicker, title, description, action, onClick }: { kicker: st
 function Empty({ title, detail, action, onClick }: { title: string; detail: string; action: string; onClick: () => void }) { return <div className="empty-state"><span>＋</span><h3>{title}</h3><p>{detail}</p><button className="quiet-link" onClick={onClick}>{action} ↗</button></div>; }
 function Note({ text }: { text: string }) { return <div className="note-strip"><span>i</span><p>{text}</p></div>; }
 
-function DataDialog({ kind, farms, farmers, plots, seasons, recommendations, selectedOutcomeSeasonId, farmerRecord, onClose, onFarmer, onFarm, onPlot, onSeason, onReading, onOutcome }: { kind: Exclude<Modal, null>; farms: Farm[]; farmers: Farmer[]; plots: Plot[]; seasons: Season[]; recommendations: SavedRecommendation[]; selectedOutcomeSeasonId: string; farmerRecord: Farmer | null; onClose: () => void; onFarmer: (event: FormEvent<HTMLFormElement>) => void; onFarm: (event: FormEvent<HTMLFormElement>) => void; onPlot: (event: FormEvent<HTMLFormElement>) => void; onSeason: (event: FormEvent<HTMLFormElement>) => void; onReading: (event: FormEvent<HTMLFormElement>) => void; onOutcome: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [selectedFarm, setSelectedFarm] = useState("");
+function DataDialog({ kind, farms, farmers, plots, seasons, recommendations, selectedOutcomeSeasonId, initialFarmId, farmerRecord, onClose, onFarmer, onFarm, onPlot, onSeason, onReading, onOutcome }: { kind: Exclude<Modal, null>; farms: Farm[]; farmers: Farmer[]; plots: Plot[]; seasons: Season[]; recommendations: SavedRecommendation[]; selectedOutcomeSeasonId: string; initialFarmId: string; farmerRecord: Farmer | null; onClose: () => void; onFarm: (event: FormEvent<HTMLFormElement>) => void; onFarmer: (event: FormEvent<HTMLFormElement>) => void; onPlot: (event: FormEvent<HTMLFormElement>) => void; onSeason: (event: FormEvent<HTMLFormElement>) => void; onReading: (event: FormEvent<HTMLFormElement>) => void; onOutcome: (event: FormEvent<HTMLFormElement>) => void }) {
+  const [selectedFarm, setSelectedFarm] = useState(initialFarmId);
   const [outcomeSeasonId, setOutcomeSeasonId] = useState(selectedOutcomeSeasonId);
   const title = kind === "farmer" ? farmerRecord ? "Edit farmer" : "Register a farmer" : kind === "farm" ? "Add a farm" : kind === "plot" ? "Add a plot" : kind === "season" ? "Start a season" : kind === "outcome" ? "Record season outcome" : "Record soil reading";
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="data-dialog" role="dialog" aria-modal="true" aria-labelledby="data-title"><div className="dialog-head"><div><div className="section-kicker">CROPCYCLE · FIELD RECORD</div><h2 id="data-title">{title}</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div>
     {kind === "farmer" && <form className="data-form" onSubmit={onFarmer}>{farmerRecord && <div className="history-hint">Permanent Farmer ID: {farmerRecord.id}</div>}<label>Farmer name<input name="name" defaultValue={farmerRecord?.name} placeholder="Full name" required autoFocus/></label><div className="form-grid"><label>Phone number<input name="phone" type="tel" defaultValue={farmerRecord?.phone} placeholder="+234 …" required/></label><label>Location<input name="location" defaultValue={farmerRecord?.location} placeholder="Town / LGA" required/></label></div><label>Farming method<select name="farming" defaultValue={farmerRecord?.farming ?? "Mono-cropping"}><option>Mono-cropping</option><option>Mixed farming</option><option>Not recorded</option></select></label>{!farmerRecord && <div className="history-hint">A permanent AGR-F ID will be assigned when this record is saved.</div>}<Actions onClose={onClose}/></form>}
-    {kind === "farm" && <form className="data-form" onSubmit={onFarm}><label>Farm name<input name="name" placeholder="e.g. Green Valley Farm" required autoFocus/></label><label>Owner<select name="ownerId" required defaultValue={farmers[0]?.id ?? ""}>{farmers.map((farmer) => <option key={farmer.id} value={farmer.id}>{farmer.name} · {farmer.id}</option>)}</select></label><label>Location<input name="location" placeholder="Town or local government area" required/></label><div className="form-grid"><label>Area (hectares)<input name="area" type="number" min="0.1" step="0.1" required/></label><label>Number of plots<input name="plots" type="number" min="1" defaultValue="1" required/></label></div><Actions onClose={onClose}/></form>}
-    {kind === "plot" && <form className="data-form" onSubmit={onPlot}><label>Farm<select name="farm" required defaultValue=""><option value="" disabled>Select a farm</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label><label>Plot name<input name="name" placeholder="e.g. North Field" required autoFocus/></label><div className="form-grid"><label>Area (hectares)<input name="area" type="number" min="0.1" step="0.1" required/></label><label>Location<input name="location" placeholder="Optional locality"/></label></div><div className="form-grid"><label>Latitude<input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="Optional"/></label><label>Longitude<input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="Optional"/></label></div><Actions onClose={onClose}/></form>}
-    {kind === "season" && <form className="data-form" onSubmit={onSeason}><label>Farm<select name="farm" required value={selectedFarm} onChange={(event) => setSelectedFarm(event.target.value)}><option value="">Select a farm</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label><label>Plot<select name="plotId" required defaultValue=""><option value="">Select a registered plot</option>{plots.filter((plot) => plot.farmId === selectedFarm).map((plot) => <option key={plot.id} value={plot.id}>{plot.name} · {plot.area} ha</option>)}</select></label><div className="form-grid"><label>Season name<input name="name" placeholder="e.g. 2026 wet season" required/></label><label>Farming method<select name="method"><option>Mono-cropping</option><option>Mixed farming</option></select></label></div><label>Previous crops<select name="previousCrops" multiple size={4}>{CROP_OPTIONS.map((crop) => <option key={crop} value={crop}>{crop}</option>)}</select><small>When left blank, recent crop history for this plot is carried forward automatically. Hold Ctrl (Windows) or Command (Mac) to select multiple crops.</small></label><label>Intended crops<select name="crop" multiple size={4}>{CROP_OPTIONS.map((crop) => <option key={crop} value={crop}>{crop}</option>)}</select><small>Select from the approved crop list. Hold Ctrl (Windows) or Command (Mac) to select multiple crops.</small></label><div className="form-grid"><label>Crops available to farmer<select name="available" multiple size={4}>{CROP_OPTIONS.map((crop) => <option key={crop} value={crop}>{crop}</option>)}</select></label><label>Crops with a market<select name="market" multiple size={4}>{CROP_OPTIONS.map((crop) => <option key={crop} value={crop}>{crop}</option>)}</select></label></div><div className="history-hint">↗ {seasons.length} prior season records will remain available as history.</div><Actions onClose={onClose}/></form>}
+    {kind === "farm" && <form className="data-form" onSubmit={onFarm}><label>Farm name<input name="name" placeholder="e.g. Green Valley Farm" required autoFocus/></label><label>Owner<select name="ownerId" required defaultValue={farmers[0]?.id ?? ""}>{farmers.map((farmer) => <option key={farmer.id} value={farmer.id}>{farmer.name} · {farmer.id}</option>)}</select></label><label>Location<input name="location" placeholder="Town or local government area" required/></label><label>Farm area (hectares)<input name="area" type="number" min="0.1" step="0.1" required/></label><div className="history-hint">Add fields / plots to this farm after saving, only if you need to track separate areas.</div><Actions onClose={onClose}/></form>}
+    {kind === "plot" && <form className="data-form" onSubmit={onPlot}><label>Farm<select name="farm" required value={selectedFarm} onChange={(event) => setSelectedFarm(event.target.value)}><option value="" disabled>Select a farm</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label><label>Field / plot name<input name="name" placeholder="e.g. North Field" required autoFocus/></label><div className="form-grid"><label>Area (hectares)<input name="area" type="number" min="0.1" step="0.1" required/></label><label>Location<input name="location" placeholder="Optional locality"/></label></div><div className="form-grid"><label>Latitude<input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="Optional"/></label><label>Longitude<input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="Optional"/></label></div><Actions onClose={onClose}/></form>}
+    {kind === "season" && <form className="data-form" onSubmit={onSeason}><label>Farm<select name="farm" required value={selectedFarm} onChange={(event) => setSelectedFarm(event.target.value)}><option value="">Select a farm</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label><label>Plot<select name="plotId" required defaultValue=""><option value="">Select a registered plot</option>{plots.filter((plot) => plot.farmId === selectedFarm).map((plot) => <option key={plot.id} value={plot.id}>{plot.name} · {plot.area} ha</option>)}</select></label><div className="form-grid"><label>Season name<input name="name" placeholder="e.g. 2026 wet season" required/></label><label>Farming method<select name="method"><option value="Mono-cropping">Mono-cropping</option><option value="Mixed farming">Mixed farming</option></select></label></div><div className="form-grid"><label>Preferred method<select name="preferredMethod"><option value="Mono-cropping">Mono-cropping</option><option value="Mixed farming">Mixed farming</option></select></label><label>Previous season<input name="previousSeason" placeholder="e.g. maize, beans or groundnut"/><small>For new users, type the crop(s) planted last season. If left blank, recent field history is used automatically for returning users.</small></label></div><CropListField name="preferredCrops" label="Preferred crops" hint="Select the crop(s) to prioritise for this season."/><div className="form-grid"><CropListField name="available" label="Available crops"/><CropListField name="market" label="Marketable crops"/></div><div className="history-hint">↗ {seasons.length} prior season records will remain available as history.</div><Actions onClose={onClose}/></form>}
     {kind === "reading" && <form className="data-form" onSubmit={onReading}><input type="hidden" name="idempotencyKey"/><label>Farm<select value={selectedFarm} onChange={(event) => setSelectedFarm(event.target.value)} required><option value="">Select a farm</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label><label>Plot<select name="plotId" required defaultValue=""><option value="">Select a registered plot</option>{plots.filter((plot) => plot.farmId === selectedFarm).map((plot) => <option key={plot.id} value={plot.id}>{plot.name} · {plot.area} ha</option>)}</select></label><label>Season<select name="seasonId" required defaultValue=""><option value="">Select the plot season</option>{seasons.filter((season) => season.farmId === selectedFarm && season.status !== "Completed").map((season) => <option key={season.id} value={season.id}>{season.name} · {season.plot}</option>)}</select></label><div className="form-grid"><label>Nitrogen (ppm)<input name="nitrogen" type="number" min="0" step="0.1" required/></label><label>Phosphorus (ppm)<input name="phosphorus" type="number" min="0" step="0.1" required/></label></div><div className="form-grid"><label>Potassium (ppm)<input name="potassium" type="number" min="0" step="0.1" required/></label><label>Soil temperature (°C)<input name="soilTemperature" type="number" min="-50" max="100" step="0.1" required/></label></div><label>Humidity (%)<input name="humidity" type="number" min="0" max="100" step="0.1" required/></label><label>Device ID (optional)<input name="deviceId" placeholder="Device code"/></label><div className="history-hint">Record all five sensor readings. NPK values use ppm; temperature uses °C; humidity uses percent. Offline readings retain their stable ID and timestamp.</div><Actions onClose={onClose}/></form>}
     {kind === "outcome" && <form className="data-form" onSubmit={onOutcome}><label>Season<select name="seasonId" value={outcomeSeasonId} onChange={(event) => setOutcomeSeasonId(event.target.value)} required><option value="">Select a season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.farm} · {season.plot} · {season.name}</option>)}</select></label><label>Recommendation (optional)<select name="recommendationId" defaultValue=""><option value="">Not linked to a recommendation</option>{recommendations.filter((recommendation) => recommendation.seasonId === outcomeSeasonId).map((recommendation) => <option key={recommendation.id} value={recommendation.id}>Version {recommendation.version} · {new Date(recommendation.createdAt).toLocaleDateString()}</option>)}</select></label><label>Actual crops planted<select name="actualCrops" multiple size={4} required>{CROP_OPTIONS.map((crop) => <option key={crop} value={crop}>{crop}</option>)}</select><small>Select from the approved crop list. Hold Ctrl (Windows) or Command (Mac) to select multiple crops.</small></label><div className="form-grid"><label>Yield quantity (optional)<input name="yieldQuantity" type="number" min="0" step="0.001"/></label><label>Yield unit<input name="yieldUnit" maxLength={40} placeholder="e.g. kg"/></label></div><label>Outcome notes (optional)<textarea name="notes" rows={3} maxLength={10000} placeholder="What happened during this season?"/></label><label>Recommendation rating (optional)<select name="rating" defaultValue=""><option value="">No rating</option><option value="1">1 · Not useful</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 · Very useful</option></select></label><label>Feedback comment (optional)<textarea name="comment" rows={3} maxLength={10000} placeholder="Share feedback on the recommendation"/></label><div className="history-hint">Actual crops are saved to this season’s crop history for future planning.</div><Actions onClose={onClose}/></form>}
   </section></div>;

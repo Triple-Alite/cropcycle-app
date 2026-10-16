@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import PasswordVisibilityToggle from "@/components/password-visibility-toggle";
 
 export default function ResetPasswordForm({ token }: { token: string }) {
   const [error, setError] = useState("");
@@ -38,5 +39,47 @@ export default function ResetPasswordForm({ token }: { token: string }) {
     }
   }
 
-  return <main className="landing-page"><header className="landing-nav"><Link className="landing-brand" href="/"><span className="brand-mark">c</span><span>cropcycle<span className="brand-period">.</span></span></Link></header><section className="auth-page-wrap"><section className="auth-dialog" aria-labelledby="reset-title"><span className="brand-mark">c</span><div className="auth-kicker">CROPCYCLE WORKSPACE</div><h1 id="reset-title">{complete ? "Password updated." : "Choose a new password."}</h1>{complete ? <><p className="auth-subtitle">Your password has been changed. Sign in with your new password.</p><Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link></> : !token ? <><p className="auth-subtitle">This password reset link is invalid or missing.</p><Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link></> : <><p className="auth-subtitle">Choose a strong password with at least 12 characters.</p><form className="auth-form" onSubmit={submit}><label>New password<div className="password-field"><input type={visible ? "text" : "password"} name="password" autoComplete="new-password" minLength={12} maxLength={128} required/><button type="button" onClick={() => setVisible(!visible)}>{visible ? "Hide" : "Show"}</button></div></label><label>Confirm new password<input type={visible ? "text" : "password"} name="confirmation" autoComplete="new-password" minLength={12} maxLength={128} required/></label>{error && <div className="auth-message" role="alert">{error}</div>}<button className="button button-dark auth-submit">Update password <span>↗</span></button></form></>}</section></section></main>;
+  return (
+    <main className="landing-page">
+      <header className="landing-nav">
+        <Link className="landing-brand" href="/">
+          <span className="brand-mark">c</span>
+          <span>cropcycle<span className="brand-period">.</span></span>
+        </Link>
+      </header>
+      <section className="auth-page-wrap">
+        <section className="auth-dialog" aria-labelledby="reset-title">
+          <span className="brand-mark" role="img" aria-label="CropCycle logo"/>
+          <div className="auth-kicker">CROPCYCLE WORKSPACE</div>
+          <h1 id="reset-title">{complete ? "Password updated." : "Choose a new password."}</h1>
+          {complete ? (
+            <>
+              <p className="auth-subtitle">Your password has been changed. Sign in with your new password.</p>
+              <Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link>
+            </>
+          ) : !token ? (
+            <>
+              <p className="auth-subtitle">This password reset link is invalid or missing.</p>
+              <Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link>
+            </>
+          ) : (
+            <>
+              <p className="auth-subtitle">Choose a strong password with at least 12 characters.</p>
+              <form className="auth-form" onSubmit={submit}>
+                <label>New password
+                  <div className="password-field">
+                    <input type={visible ? "text" : "password"} name="password" autoComplete="new-password" minLength={12} maxLength={128} required/>
+                    <PasswordVisibilityToggle visible={visible} onToggle={() => setVisible(!visible)}/>
+                  </div>
+                </label>
+                <label>Confirm new password<input type={visible ? "text" : "password"} name="confirmation" autoComplete="new-password" minLength={12} maxLength={128} required/></label>
+                {error && <div className="auth-message" role="alert">{error}</div>}
+                <button className="button button-dark auth-submit">Update password <span>↗</span></button>
+              </form>
+            </>
+          )}
+        </section>
+      </section>
+    </main>
+  );
 }

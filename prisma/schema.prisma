@@ -70,6 +70,14 @@ enum DeviceOwnership {
   CUSTOMER
 }
 
+enum ServiceVisitStatus {
+  REQUESTED
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 enum KnowledgeStatus {
   DRAFT
   APPROVED
@@ -104,6 +112,8 @@ model User {
   approvedKnowledge   KnowledgeRule[]  @relation("KnowledgeApprover")
   reviewedRecs        Recommendation[] @relation("RecommendationReviewer")
   recordedFeedback    Feedback[]
+  requestedServiceVisits ServiceVisit[] @relation("ServiceVisitRequester")
+  assignedServiceVisits  ServiceVisit[] @relation("ServiceVisitAssignee")
 
   @@index([role, disabledAt])
 }
@@ -183,6 +193,7 @@ model Farm {
   seasons        Season[]
   devices        Device[]
   deviceAssignments DeviceAssignment[]
+  serviceVisits  ServiceVisit[]
   soilReadings   SoilReading[]
   recommendations Recommendation[]
   outcomes       Outcome[]
@@ -228,6 +239,7 @@ model Plot {
   soilReadings   SoilReading[]
   devices        Device[]
   deviceAssignments DeviceAssignment[]
+  serviceVisits  ServiceVisit[]
   recommendations Recommendation[]
   outcomes       Outcome[]
 
@@ -304,6 +316,7 @@ model Device {
   farm           Farm?            @relation(fields: [farmId], references: [id], onDelete: SetNull)
   plot           Plot?            @relation(fields: [farmId, plotId], references: [farmId, id], onDelete: SetNull)
   assignments    DeviceAssignment[]
+  serviceVisits  ServiceVisit[]
   readings       SoilReading[]
 
   @@index([farmId, plotId, status])
@@ -322,6 +335,32 @@ model DeviceAssignment {
 
   @@index([deviceId, releasedAt])
   @@index([farmId, plotId, releasedAt])
+}
+
+model ServiceVisit {
+  id              String            @id @default(cuid())
+  farmId          String
+  plotId          String?
+  deviceId        String?
+  requestedById   String
+  assignedToId    String?
+  serviceType     String            @db.VarChar(80)
+  description     String            @db.Text
+  status          ServiceVisitStatus @default(REQUESTED)
+  scheduledAt     DateTime?
+  completedAt     DateTime?
+  operationsNotes String?            @db.Text
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  farm            Farm               @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  plot            Plot?              @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  device          Device?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  requestedBy     User               @relation("ServiceVisitRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  assignedTo      User?              @relation("ServiceVisitAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([farmId, status, scheduledAt])
+  @@index([requestedById, createdAt])
+  @@index([assignedToId, status])
 }
 
 model SoilReading {
