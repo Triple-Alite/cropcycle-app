@@ -350,6 +350,27 @@ export default function Home() {
       mounted = false;
     };
   }, []);
+  useEffect(() => {
+  if (!signedIn) return;
+  let refreshing = false;
+  const refreshWhenVisible = async () => {
+    if (document.visibilityState !== "visible" || refreshing) return;
+    refreshing = true;
+    try {
+      await refreshWorkspace();
+    } catch (error) {
+      setNotice(error instanceof Error ? `Live readings refresh failed: ${error.message}` : "Live readings refresh failed.");
+    } finally {
+      refreshing = false;
+    }
+  };
+  const interval = window.setInterval(() => void refreshWhenVisible(), 15_000);
+  document.addEventListener("visibilitychange", refreshWhenVisible);
+  return () => {
+    window.clearInterval(interval);
+    document.removeEventListener("visibilitychange", refreshWhenVisible);
+  };
+  }, [signedIn, refreshWorkspace]);
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(""), 3000); return () => window.clearTimeout(timer); }, [notice]);
 
   async function saveAuth(event: FormEvent<HTMLFormElement>) {

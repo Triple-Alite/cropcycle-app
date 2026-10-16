@@ -27,6 +27,7 @@ type DeviceOption = { deviceCode: string; farmCode: string; status: string };
 type DeviceRecord = {
   id: string;
   deviceCode: string;
+  apiKeyConfigured: boolean;
   type: string;
   status: "ACTIVE" | "INACTIVE" | "MAINTENANCE" | "RETIRED";
   ownership: "CROPCYCLE" | "CUSTOMER";
@@ -233,6 +234,7 @@ export function DeviceManagementWorkspace() {
   const [farmId, setFarmId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [issuedCredential, setIssuedCredential] = useState<{ deviceCode: string; apiKey: string } | null>(null);
 
   async function refreshInventory() {
     const result = await apiRequest<Inventory>("/api/devices");
@@ -257,9 +259,10 @@ export function DeviceManagementWorkspace() {
     setSaving(true);
     setError("");
     setNotice("");
+    setIssuedCredential(null);
     const data = new FormData(form);
     try {
-      await apiRequest("/api/devices", {
+      const result = await apiRequest<{ deviceCode: string; apiKey: string }>("/api/devices", {
         method: "POST",
         body: JSON.stringify({
           deviceCode: String(data.get("deviceCode") ?? ""),
@@ -273,6 +276,7 @@ export function DeviceManagementWorkspace() {
       form.reset();
       setFarmId("");
       setNotice("Device registered.");
+      setIssuedCredential({ deviceCode: result.deviceCode, apiKey: result.apiKey });
       try {
         await refreshInventory();
       } catch {
@@ -314,6 +318,30 @@ export function DeviceManagementWorkspace() {
     }
   }
 
+  async function rotateDeviceKey(device: DeviceRecord) {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    setIssuedCredential(null);
+    try {
+      const result = await apiRequest<{ deviceCode: string; apiKey: string }>(
+        `/api/devices/${encodeURIComponent(device.deviceCode)}/credentials`,
+        { method: "POST" },
+      );
+      setIssuedCredential(result);
+      setNotice(`A new key was issued for ${device.deviceCode}. The previous key no longer works.`);
+      try {
+        await refreshInventory();
+      } catch {
+        setError("The key was issued, but inventory could not refresh.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to issue device credentials.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return <div className="service-workspace">
     <div className="page-heading-row"><div><div className="date-eyebrow">CROPCYCLE ADMIN · SERVICE ASSETS</div><h1>Device operations</h1><p>Register CropCycle equipment, manage farm assignments and track device status.</p></div></div>
     <div className="device-workspace-grid">
@@ -332,9 +360,10 @@ export function DeviceManagementWorkspace() {
       </section>
       <section className="panel device-inventory-panel">
         <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div>
-        {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>         : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice}/>)}
+        {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>                 : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice} onRotateKey={rotateDeviceKey}/>)}
       </section>
     </div>
+    {issuedCredential && <section className="panel device-key-panel"><div><div className="section-kicker">DEVICE API CREDENTIAL · SHOWN ONCE</div><h2>{issuedCredential.deviceCode}</h2><p>Copy this key to the device configuration now. It will not be shown again; issuing another key revokes this one.</p></div><code>{issuedCredential.apiKey}</code><button type="button" className="quiet-link" onClick={() => setIssuedCredential(null)}>Hide key</button></section>}
   </div>;
 }
 
@@ -343,17 +372,20 @@ function DeviceRecordCard({
   inventory,
   saving,
   onSubmit,
+  onRotateKey,
 }: {
   device: DeviceRecord;
   inventory: Inventory;
   saving: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>, device: DeviceRecord) => void;
+  onRotateKey: (device: DeviceRecord) => void;
 }) {
   const [farmCode, setFarmCode] = useState(device.farmCode);
   const [plotCode, setPlotCode] = useState(device.plotCode);
   return <article className="device-record">
     <div className="device-record-heading"><div><strong>{device.deviceCode}</strong><small>{device.type} · {device.ownership === "CROPCYCLE" ? "CropCycle-owned" : "Customer-owned"}</small></div><span className={`service-status service-status-${device.status.toLowerCase().replace("_", "-")}`}>{device.status.replace("_", " ")}</span></div>
     <div className="device-record-meta"><span>{device.farm || "Unassigned"}{device.plot ? ` · ${device.plot}` : ""}</span><span>{device.firmware ? `Firmware ${device.firmware}` : "Firmware not recorded"}</span><span>{device.lastConnectedAt ? `Last connected ${new Date(device.lastConnectedAt).toLocaleString()}` : "No connection recorded"}</span></div>
+    <div className="device-key-actions"><span>{device.apiKeyConfigured ? "API key configured" : "No API key issued"}</span><button type="button" className="quiet-link" disabled={saving} onClick={() => onRotateKey(device)}>{device.apiKeyConfigured ? "Rotate API key" : "Issue API key"}</button></div>
     <form className="device-update-form" onSubmit={(event) => onSubmit(event, device)}>
       <div className="form-grid"><label>Status<select name="status" defaultValue={device.status}><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option><option value="MAINTENANCE">Maintenance</option><option value="RETIRED">Retired</option></select></label><label>Ownership<select name="ownership" defaultValue={device.ownership}><option value="CROPCYCLE">CropCycle</option><option value="CUSTOMER">Customer-owned</option></select></label></div>
       <div className="form-grid"><label>Farm assignment<select name="farmCode" value={farmCode} onChange={(event) => { setFarmCode(event.target.value); setPlotCode(""); }}><option value="">Unassigned</option>{inventory.farms.map((farm) => <option key={farm.farmCode} value={farm.farmCode}>{farm.name}</option>)}</select></label><label>Field assignment<select name="plotCode" value={plotCode} onChange={(event) => setPlotCode(event.target.value)}><option value="">Farm-wide assignment</option>{inventory.plots.filter((plot) => plot.farmCode === farmCode).map((plot) => <option key={plot.plotCode} value={plot.plotCode}>{plot.name}</option>)}</select></label></div>

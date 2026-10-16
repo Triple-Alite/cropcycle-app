@@ -2,6 +2,7 @@ import { DeviceOwnership, DeviceStatus, UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, validationError } from "@/lib/api";
 import { requireSessionUser } from "@/lib/auth";
+import { createDeviceApiKey, hashDeviceApiKey } from "@/lib/device-credentials";
 import { prisma } from "@/lib/prisma";
 
 const ownerships = new Set(Object.values(DeviceOwnership));
@@ -33,6 +34,7 @@ export async function GET() {
         return {
           id: device.id,
           deviceCode: device.deviceCode,
+          apiKeyConfigured: Boolean(device.apiKeyHash),
           type: device.type,
           status: device.status,
           ownership: device.ownership,
@@ -92,10 +94,12 @@ export async function POST(request: NextRequest) {
       return validationError("Choose a farm before assigning a field.");
     }
 
+    const apiKey = createDeviceApiKey();
     const device = await prisma.$transaction(async (tx) => {
       const created = await tx.device.create({
         data: {
           deviceCode,
+          apiKeyHash: hashDeviceApiKey(apiKey),
           type,
           ownership: ownership as DeviceOwnership,
           firmware: typeof input.firmware === "string" && input.firmware.trim() ? input.firmware.trim() : null,
@@ -111,7 +115,10 @@ export async function POST(request: NextRequest) {
       }
       return created;
     });
-    return NextResponse.json({ id: device.id, deviceCode: device.deviceCode }, { status: 201 });
+    return NextResponse.json(
+      { id: device.id, deviceCode: device.deviceCode, apiKey },
+      { status: 201, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return errorResponse(error);
   }

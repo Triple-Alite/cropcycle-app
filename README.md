@@ -53,6 +53,39 @@ Apply the Prisma schema before exercising database-backed workflows. Run migrati
 
 The soil reading API and Crop Scientist rule criteria use the same five parameters: nitrogen, phosphorus and potassium in ppm; soil temperature in °C; and humidity in percent. The UI uses Montserrat with the primary brand colors `#CCF863`, `#00410B` and `#FFFFFF`.
 
+## Hardware soil-reading endpoint
+
+The device firmware sends one JSON `POST` for each completed sensor reading to:
+
+```text
+https://<your-deployed-app-domain>/api/hardware/readings
+```
+
+Authenticate with the device-specific bearer key issued from the admin **Device operations** page:
+
+```http
+Authorization: Bearer <device-api-key>
+Content-Type: application/json
+```
+
+Example JSON body:
+
+```json
+{
+  "readingId": "soil-cc-0001-00000042",
+  "recordedAt": "2026-10-16T05:10:00.000Z",
+  "nitrogen": 42.5,
+  "phosphorus": 18.2,
+  "potassium": 105.7,
+  "soilTemperature": 26.4,
+  "humidity": 61.2
+}
+```
+
+`readingId` must be unique and stable across retries. `recordedAt` is optional and must be an ISO 8601 timestamp if supplied. Nitrogen, phosphorus and potassium use ppm; soil temperature uses °C; humidity uses percent. The device must be active, have an API key, and be assigned to a farm field with an active or planned season. The server derives the farm, field, season and farmer from that assignment; firmware must not send those IDs.
+
+Successful responses return HTTP `201` with `status: "accepted"`; an identical retry returns HTTP `200` with `status: "duplicate"`. Reusing a `readingId` with different values returns HTTP `409`. Device keys are shown only when issued or rotated; store them securely in device configuration, and use HTTPS for all transmissions. The signed-in application refreshes its workspace every 15 seconds so persisted hardware readings appear in the soil readings view.
+
 ## Architecture direction
 
 Keep agricultural knowledge separate from recommendation orchestration and AI-provider adapters. Persist farmer, farm, plot, season, crop history, requirements, soil-reading, device, recommendation, outcome and feedback records with explicit ownership relationships. Keep localization strings outside workflow logic when adding Hausa, Yoruba and Igbo.
