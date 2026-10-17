@@ -1,9 +1,14 @@
-import { KnowledgeStatus, Prisma, RecommendationStatus } from "@prisma/client";
+import { FarmingMethod, Prisma, RecommendationStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { parseKnowledgeBody } from "@/lib/agricultural-knowledge";
 import { errorResponse, validationError } from "@/lib/api";
 import { requireSessionUser } from "@/lib/auth";
-import { ActiveRule, assessCrops, SeasonRecommendationContext } from "@/lib/recommendation-engine";
+import {
+  assessCropsWithEngine,
+  EngineRequestError,
+  engineSoilReading,
+  EngineUnavailableError,
+  SeasonRecommendationContext,
+} from "@/lib/recommendation-engine";
 import { farmWhere, farmingMethodLabel, hasFarmPermission, recommendationWhere } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
 
@@ -62,58 +67,20 @@ export async function POST(request: NextRequest) {
       return validationError("You do not have permission to assess this farm's recommendations.", 403);
     }
 
-    const [reading, approvedRules] = await Promise.all([
-      prisma.soilReading.findFirst({
-        where: { farmId: season.farmId, plotId: season.plotId, seasonId: season.id },
-        orderBy: { recordedAt: "desc" },
-        select: {
-          nitrogen: true,
-          phosphorus: true,
-          potassium: true,
-          soilTemperature: true,
-          humidity: true,
-          recordedAt: true,
-        },
-      }),
-      prisma.knowledgeRule.findMany({
-        where: {
-          status: KnowledgeStatus.APPROVED,
-          AND: [
-            { OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: new Date() } }] },
-            { OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }] },
-          ],
-        },
-        select: {
-          id: true,
-          key: true,
-          version: true,
-          title: true,
-          body: true,
-          sourceCitation: true,
-        },
-        orderBy: [{ key: "asc" }, { version: "desc" }],
-      }),
-    ]);
-
-    const activeRules: ActiveRule[] = [];
-    const seenKeys = new Set<string>();
-    for (const rule of approvedRules) {
-      if (seenKeys.has(rule.key)) continue;
-      seenKeys.add(rule.key);
-      const parsed = parseKnowledgeBody(rule.body);
-      if (!parsed.ok) {
-        console.error("Skipping invalid approved agricultural knowledge rule:", rule.id, parsed.error);
-        continue;
-      }
-      activeRules.push({
-        id: rule.id,
-        key: rule.key,
-        version: rule.version,
-        title: rule.title,
-        sourceCitation: rule.sourceCitation,
-        body: parsed.body,
-      });
-    }
+    const reading = await prisma.soilReading.findFirst({
+      where: { farmId: season.farmId, plotId: season.plotId, seasonId: season.id },
+      orderBy: { recordedAt: "desc" },
+      select: {
+        moisture: true,
+        pH: true,
+        nitrogen: true,
+        phosphorus: true,
+        potassium: true,
+        soilTemperature: true,
+        humidity: true,
+        recordedAt: true,
+      },
+    });
 
     const context: SeasonRecommendationContext = {
       seasonId: season.id,
@@ -147,11 +114,77 @@ export async function POST(request: NextRequest) {
         recordedAt: reading?.recordedAt.toISOString() ?? null,
       },
     };
-    const result = assessCrops(context, activeRules);
-    const citedRuleIds = new Set(
-      result.candidates.flatMap((candidate) => candidate.knowledge.map((rule) => rule.id)),
-    );
-    const citedRules = activeRules.filter((rule) => citedRuleIds.has(rule.id));
+    const engineReading = engineSoilReading(reading);
+    // Rotation is checked only against crops grown before this season;
+    // ACTUAL crops are this season's own plantings.
+    const rotationPreviousCrops = season.crops
+      .filter((crop) => crop.recordType === "PREVIOUS")
+      .map((crop) => crop.name);
+    const soilSnapshot = {
+      ...context.soil,
+      moisture: engineReading.moisture,
+      pH: engineReading.ph,
+    };
+
+    // No fallback: if the engine cannot assess, nothing is saved.
+    let assessment: Awaited<ReturnType<typeof assessCropsWithEngine>>;
+    try {
+      assessment = await assessCropsWithEngine({
+        candidateCrops: [...context.intendedCrops, ...context.availableCrops, ...context.marketableCrops],
+        intendedCrops: context.intendedCrops,
+        previousCrops: rotationPreviousCrops,
+        mixedFarming: context.farmingMethod === FarmingMethod.MIXED_FARMING,
+        reading: engineReading,
+      });
+    } catch (error) {
+      if (error instanceof EngineUnavailableError) {
+        console.error("CropCycle engine unavailable:", error);
+        return NextResponse.json({
+          error: "The recommendation engine is currently unavailable. No recommendation was created. Please try again.",
+          code: error.code,
+          retryable: error.retryable,
+        }, { status: 503 });
+      }
+      if (error instanceof EngineRequestError) {
+        console.error("CropCycle engine rejected the request:", error.engineStatus, error.message);
+        return NextResponse.json({
+          error: "The recommendation engine could not assess this season. No recommendation was created.",
+        }, { status: 500 });
+      }
+      throw error;
+    }
+
+    const noticeParts = assessment.candidates.length
+      ? [
+        `Assessed against the CropCycle crop knowledge base${assessment.kbVersion ? ` (version ${assessment.kbVersion})` : ""}.`,
+        "Soil EC is not recorded yet and is not part of soil verdicts.",
+        ...(assessment.mix && !assessment.mix.valid ? [`The planned crop mix is not valid: ${assessment.mix.reasons.join(" ")}`] : []),
+        ...(assessment.unmappedPreviousCrops.length
+          ? [`Previous crops not in the knowledge base were not rotation-checked: ${assessment.unmappedPreviousCrops.join(", ")}.`]
+          : []),
+        "This is decision-support, not a guarantee of yield or a substitute for local expert review.",
+      ]
+      : ["No intended, available, or marketable crops are recorded for this season. Add the farmer's crop requirements before requesting an assessment."];
+    const result = {
+      notice: noticeParts.join(" "),
+      candidates: assessment.candidates,
+      engine: {
+        kbVersion: assessment.kbVersion,
+        mix: assessment.mix,
+        unmappedPreviousCrops: assessment.unmappedPreviousCrops,
+      },
+      dataUsed: {
+        soil: soilSnapshot,
+        previousCrops: rotationPreviousCrops,
+        intendedCrops: context.intendedCrops,
+        availableCrops: context.availableCrops,
+        marketableCrops: context.marketableCrops,
+        preferredMethod: context.preferredMethod
+          ? farmingMethodLabel(context.preferredMethod)
+          : null,
+        otherRequirements: context.otherRequirements,
+      },
+    };
 
     const recommendation = await prisma.$transaction(async (tx) => {
       const latest = await tx.recommendation.aggregate({
@@ -166,8 +199,8 @@ export async function POST(request: NextRequest) {
           seasonId: season.id,
           version: (latest._max.version ?? 0) + 1,
           status: RecommendationStatus.NEEDS_REVIEW,
-          provider: "cropcycle-approved-rules",
-          modelVersion: "1",
+          provider: "cropcycle-engine",
+          modelVersion: assessment.kbVersion ?? "not-called",
           inputSnapshot: {
             seasonId: context.seasonId,
             seasonName: context.seasonName,
@@ -185,53 +218,11 @@ export async function POST(request: NextRequest) {
             intendedCrops: context.intendedCrops,
             availableCrops: context.availableCrops,
             marketableCrops: context.marketableCrops,
-            previousCrops: context.previousCrops,
-            soil: {
-              nitrogen: context.soil.nitrogen,
-              phosphorus: context.soil.phosphorus,
-              potassium: context.soil.potassium,
-              soilTemperature: context.soil.soilTemperature,
-              humidity: context.soil.humidity,
-              recordedAt: context.soil.recordedAt,
-            },
+            previousCrops: rotationPreviousCrops,
+            soil: soilSnapshot,
+            engineReading,
           },
-          result: {
-            notice: result.notice,
-            candidates: result.candidates.map((candidate) => ({
-              crop: candidate.crop,
-              suitability: candidate.suitability,
-              reasons: candidate.reasons,
-              alternatives: candidate.alternatives,
-              considerations: candidate.considerations,
-              knowledge: candidate.knowledge.map((rule) => ({
-                id: rule.id,
-                title: rule.title,
-                source: rule.source,
-                version: rule.version,
-              })),
-            })),
-            dataUsed: {
-              soil: {
-                nitrogen: context.soil.nitrogen,
-                phosphorus: context.soil.phosphorus,
-                potassium: context.soil.potassium,
-                soilTemperature: context.soil.soilTemperature,
-                humidity: context.soil.humidity,
-                recordedAt: context.soil.recordedAt,
-              },
-              previousCrops: context.previousCrops,
-              intendedCrops: context.intendedCrops,
-              availableCrops: context.availableCrops,
-              marketableCrops: context.marketableCrops,
-              preferredMethod: context.preferredMethod
-                ? farmingMethodLabel(context.preferredMethod)
-                : null,
-              otherRequirements: context.otherRequirements,
-            },
-          },
-          knowledgeRules: citedRules.length
-            ? { create: citedRules.map((rule) => ({ knowledgeRuleId: rule.id })) }
-            : undefined,
+          result,
         },
         include: {
           knowledgeRules: {

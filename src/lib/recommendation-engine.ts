@@ -234,9 +234,9 @@ function toEngineNumber(value: DbNumber) {
 }
 
 // Maps a stored SoilReading to the engine's parameters. Missing values stay
-// null, never zero. SoilReading has no EC column, so ec is always null and
-// verdicts cannot rise above UNCONFIRMED until EC is recorded. `humidity` is
-// not volumetric soil moisture and is deliberately not mapped.
+// null, never zero. SoilReading has no EC column, so ec is always null; the
+// engine leaves a missing EC out of the verdict until EC is recorded.
+// `humidity` is not volumetric soil moisture and is deliberately not mapped.
 export function engineSoilReading(reading: {
   moisture?: DbNumber;
   pH?: DbNumber;
@@ -382,4 +382,205 @@ export function enginePairCheck(aId: string, bId: string) {
 
 export function engineMixCheck(cropIds: string[]) {
   return engineRequest<{ check: EngineMixCheck }>("/companion/mix", { crop_ids: cropIds });
+}
+
+export type EngineCandidate = {
+  crop_id: string;
+  soil: EngineSoilVerdict;
+  rotation: EngineRotationCheck[];
+};
+
+export function engineAssess(input: {
+  cropIds: string[];
+  reading: EngineSoilReading;
+  previousCropIds: string[];
+  yearsSince: number;
+  mixCropIds: string[];
+}) {
+  return engineRequest<{ candidates: EngineCandidate[]; mix: EngineMixCheck | null }>("/assess", {
+    crop_ids: input.cropIds,
+    reading: input.reading,
+    previous_crop_ids: input.previousCropIds,
+    years_since: input.yearsSince,
+    mix_crop_ids: input.mixCropIds,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Engine assessment -> saved recommendation candidates
+// Keeps the CropAssessment shape the workspace UI renders, and attaches the
+// raw engine output under `engine` so nothing the engine said is lost.
+// ---------------------------------------------------------------------------
+
+export type EngineCropAssessment = CropAssessment & {
+  cropId: string | null;
+  engine: EngineCandidate | null;
+};
+
+const ENGINE_CROP_NAMES = new Map(Object.entries(ENGINE_CROP_IDS).map(([name, id]) => [id, name]));
+
+const PARAM_LABELS: Record<EngineParamCheck["parameter"], string> = {
+  moisture: "moisture",
+  ph: "pH",
+  temperature: "temperature",
+  ec: "EC",
+  n: "nitrogen",
+  p: "phosphorus",
+  k: "potassium",
+};
+
+function describeParam(check: EngineParamCheck): string | null {
+  const label = PARAM_LABELS[check.parameter];
+  const value = `${check.value} ${check.unit}`;
+  switch (check.status) {
+    case "UNSUITABLE":
+      return `Soil ${label} ${value} is outside the tolerable range ${check.tolerable_min}–${check.tolerable_max}` +
+        (check.gate === "HARD" ? " (hard limit)." : "; amend before planting.");
+    case "TOLERABLE":
+      return `Soil ${label} ${value} is tolerable but outside the ideal range ${check.ideal_min}–${check.ideal_max}.`;
+    case "MISSING":
+      // EC is not recorded yet and is left out of the verdict by the engine.
+      return check.parameter === "ec" ? null : `No soil ${label} reading is recorded.`;
+    default:
+      return null;
+  }
+}
+
+function translateCandidate(
+  crop: string,
+  candidate: EngineCandidate,
+  mix: EngineMixCheck | null,
+): EngineCropAssessment {
+  const reasons: string[] = [];
+  const considerations: string[] = [];
+  let hasProblem = false;
+  let hasMissing = false;
+
+  switch (candidate.soil.overall) {
+    case "IDEAL":
+      reasons.push("All measured soil parameters are in this crop's ideal range.");
+      break;
+    case "SUITABLE":
+      reasons.push("All measured soil parameters are within this crop's tolerable range.");
+      break;
+    case "AMEND_FIRST":
+      hasProblem = true;
+      considerations.push("Soil nutrients (N/P/K) must be amended before planting.");
+      break;
+    case "NOT_SUITABLE":
+      hasProblem = true;
+      considerations.push("Soil conditions are outside this crop's hard limits.");
+      break;
+    case "UNCONFIRMED":
+      hasMissing = true;
+      break;
+  }
+  for (const check of candidate.soil.params) {
+    const text = describeParam(check);
+    if (text) considerations.push(text);
+  }
+
+  if (!candidate.rotation.length) {
+    considerations.push("No previous crop is recorded for this plot, so rotation was not checked.");
+  }
+  for (const check of candidate.rotation) {
+    const previous = ENGINE_CROP_NAMES.get(check.prev_id) ?? check.prev_id;
+    if (check.rating === "X") {
+      hasProblem = true;
+      considerations.push(`Never plant after ${previous}: ${check.reason}`);
+    } else if (check.rating === "P") {
+      hasProblem = true;
+      considerations.push(`Poor choice after ${previous}: ${check.reason}`);
+    } else if (check.rating === "NA") {
+      considerations.push(`Rotation after ${previous} does not apply: ${check.reason}`);
+    } else {
+      reasons.push(`${check.rating === "G" ? "Good" : "Acceptable"} after ${previous}: ${check.reason}`);
+    }
+  }
+
+  if (mix?.crop_ids.includes(candidate.crop_id)) {
+    const involves = (pair: EnginePairCheck) => pair.a_id === candidate.crop_id || pair.b_id === candidate.crop_id;
+    const partner = (pair: EnginePairCheck) =>
+      ENGINE_CROP_NAMES.get(pair.a_id === candidate.crop_id ? pair.b_id : pair.a_id) ?? "";
+    for (const pair of mix.never.filter(involves)) {
+      hasProblem = true;
+      considerations.push(`Never plant together with ${partner(pair)}: ${pair.reason}`);
+    }
+    for (const pair of mix.avoid.filter(involves)) {
+      hasProblem = true;
+      considerations.push(`Avoid planting together with ${partner(pair)}: ${pair.reason}`);
+    }
+    for (const pair of mix.conditional.filter(involves)) {
+      considerations.push(`Can share a plot with ${partner(pair)} with care: ${pair.reason}`);
+    }
+  }
+
+  return {
+    crop,
+    cropId: candidate.crop_id,
+    suitability: hasProblem ? "review-needed" : hasMissing ? "insufficient-data" : "supported",
+    reasons,
+    alternatives: [],
+    considerations,
+    knowledge: [],
+    engine: candidate,
+  };
+}
+
+// Throws EngineUnavailableError / EngineRequestError; callers must not
+// substitute another result when the engine fails.
+export async function assessCropsWithEngine(input: {
+  candidateCrops: string[];
+  intendedCrops: string[];
+  previousCrops: string[];
+  mixedFarming: boolean;
+  reading: EngineSoilReading;
+}) {
+  const crops = [...new Map(input.candidateCrops.map((crop) => [crop.trim().toLocaleLowerCase(), crop.trim()])).values()];
+  const mapped = crops.flatMap((crop) => {
+    const cropId = engineCropId(crop);
+    return cropId ? [{ crop, cropId }] : [];
+  });
+  const previousCropIds = [...new Set(input.previousCrops.flatMap((crop) => engineCropId(crop) ?? []))];
+  const unmappedPreviousCrops = input.previousCrops.filter((crop) => !engineCropId(crop));
+  const mixCropIds = input.mixedFarming
+    ? [...new Set(input.intendedCrops.flatMap((crop) => engineCropId(crop) ?? []))]
+    : [];
+
+  const assessment = mapped.length
+    ? await engineAssess({
+      cropIds: mapped.map((item) => item.cropId),
+      reading: input.reading,
+      previousCropIds,
+      // Previous crops on a season are the plot's immediately preceding crops.
+      yearsSince: 0,
+      mixCropIds,
+    })
+    : null;
+
+  const byId = new Map<string, EngineCandidate>(assessment?.candidates.map((candidate) => [candidate.crop_id, candidate]) ?? []);
+  const candidates: EngineCropAssessment[] = crops.map((crop) => {
+    const cropId = engineCropId(crop);
+    const result = cropId ? byId.get(cropId) : undefined;
+    if (!cropId || !result) {
+      return {
+        crop,
+        cropId: null,
+        suitability: "insufficient-data",
+        reasons: [],
+        alternatives: [],
+        considerations: ["This crop is not in the CropCycle knowledge base, so it was not assessed."],
+        knowledge: [],
+        engine: null,
+      };
+    }
+    return translateCandidate(crop, result, assessment?.mix ?? null);
+  });
+
+  return {
+    kbVersion: assessment?.kb_version ?? null,
+    candidates,
+    mix: assessment?.mix ?? null,
+    unmappedPreviousCrops,
+  };
 }

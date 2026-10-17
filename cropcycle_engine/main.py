@@ -132,6 +132,14 @@ class MixIn(Strict):
     crop_ids: list[CropId] = Field(min_length=1, max_length=21)
 
 
+class AssessIn(Strict):
+    crop_ids: list[CropId] = Field(min_length=1, max_length=21)
+    reading: SoilReadingIn
+    previous_crop_ids: list[CropId] = Field(default_factory=list, max_length=21)
+    years_since: int = Field(default=0, ge=0, le=100)
+    mix_crop_ids: list[CropId] = Field(default_factory=list, max_length=21)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -178,3 +186,24 @@ def post_pair(body: PairIn) -> dict:
 @app.post("/companion/mix", dependencies=[Depends(require_token)])
 def post_mix(body: MixIn) -> dict:
     return {"kb_version": KB.version, "check": asdict(mix_check(body.crop_ids, KB))}
+
+
+@app.post("/assess", dependencies=[Depends(require_token)])
+def post_assess(body: AssessIn) -> dict:
+    """One call per recommendation: soil verdict and rotation checks for every
+    candidate, plus a mix check when 2+ mix crops are given, all against the
+    same KB version."""
+    reading = body.reading.to_model()
+    candidates = [
+        {
+            "crop_id": cid,
+            "soil": asdict(soil_verdict(cid, reading, KB)),
+            "rotation": [
+                asdict(rotation_check(prev, cid, body.years_since, KB))
+                for prev in body.previous_crop_ids
+            ],
+        }
+        for cid in body.crop_ids
+    ]
+    mix = asdict(mix_check(body.mix_crop_ids, KB)) if len(body.mix_crop_ids) >= 2 else None
+    return {"kb_version": KB.version, "candidates": candidates, "mix": mix}
