@@ -1,5 +1,6 @@
-import { FarmingMethod } from "@prisma/client";
+import { FarmingMethod, Prisma } from "@prisma/client";
 import { StructuredKnowledgeBody } from "@/lib/agricultural-knowledge";
+import { canonicalCropName, CROP_OPTIONS } from "@/lib/crops";
 
 export type SeasonRecommendationContext = {
   seasonId: string;
@@ -175,4 +176,210 @@ export function assessCrops(context: SeasonRecommendationContext, rules: ActiveR
       : "No intended, available, or marketable crops are recorded for this season. Add the farmer's crop requirements before requesting an assessment.",
     dataUsed: context,
   };
+}
+
+// ---------------------------------------------------------------------------
+// CropCycle engine bridge
+// Server-to-server client for the Python FastAPI service in cropcycle_engine/.
+// Server-only: it reads CROPCYCLE_ENGINE_TOKEN, so never import it into client
+// components. Wire types mirror the engine's JSON (snake_case) exactly.
+// ---------------------------------------------------------------------------
+
+const ENGINE_TIMEOUT_MS = 10_000;
+
+// App crop names -> knowledge-base crop IDs (1_Crops sheet).
+export const ENGINE_CROP_IDS: Record<(typeof CROP_OPTIONS)[number], string> = {
+  Yam: "CRP001",
+  Maize: "CRP002",
+  Beans: "CRP003",
+  "Guinea Corn": "CRP004",
+  Rice: "CRP005",
+  Groundnut: "CRP006",
+  "Soya Beans": "CRP007",
+  Tomatoes: "CRP008",
+  Pepper: "CRP009",
+  Millet: "CRP010",
+  Okro: "CRP011",
+  "Bambara nut": "CRP012",
+  Cassava: "CRP013",
+  Spinach: "CRP014",
+  Hibiscus: "CRP015",
+  Potatoes: "CRP016", // KB: Sweet Potato
+  Sheanut: "CRP017",
+  Sesame: "CRP018",
+  Sugarcane: "CRP019",
+  Gardenegg: "CRP020", // KB: Garden Egg
+  Onions: "CRP021",
+};
+
+export function engineCropId(cropName: string): string | null {
+  const crop = canonicalCropName(cropName);
+  return crop ? ENGINE_CROP_IDS[crop] : null;
+}
+
+export type EngineSoilReading = {
+  moisture: number | null;
+  ph: number | null;
+  temperature: number | null;
+  ec: number | null;
+  n: number | null;
+  p: number | null;
+  k: number | null;
+};
+
+type DbNumber = Prisma.Decimal | number | null | undefined;
+
+function toEngineNumber(value: DbNumber) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+// Maps a stored SoilReading to the engine's parameters. Missing values stay
+// null, never zero. SoilReading has no EC column, so ec is always null and
+// verdicts cannot rise above UNCONFIRMED until EC is recorded. `humidity` is
+// not volumetric soil moisture and is deliberately not mapped.
+export function engineSoilReading(reading: {
+  moisture?: DbNumber;
+  pH?: DbNumber;
+  soilTemperature?: DbNumber;
+  nitrogen?: DbNumber;
+  phosphorus?: DbNumber;
+  potassium?: DbNumber;
+} | null): EngineSoilReading {
+  return {
+    moisture: toEngineNumber(reading?.moisture),
+    ph: toEngineNumber(reading?.pH),
+    temperature: toEngineNumber(reading?.soilTemperature),
+    ec: null,
+    n: toEngineNumber(reading?.nitrogen),
+    p: toEngineNumber(reading?.phosphorus),
+    k: toEngineNumber(reading?.potassium),
+  };
+}
+
+export type EngineParamCheck = {
+  parameter: "moisture" | "ph" | "temperature" | "ec" | "n" | "p" | "k";
+  value: number | null;
+  status: "IDEAL" | "TOLERABLE" | "UNSUITABLE" | "MISSING";
+  gate: "HARD" | "CORRECTABLE";
+  unit: string;
+  ideal_min: number;
+  ideal_max: number;
+  tolerable_min: number;
+  tolerable_max: number;
+};
+
+export type EngineSoilVerdict = {
+  crop_id: string;
+  crop: string;
+  overall: "IDEAL" | "SUITABLE" | "AMEND_FIRST" | "UNCONFIRMED" | "NOT_SUITABLE";
+  params: EngineParamCheck[];
+};
+
+export type EngineRotationCheck = {
+  prev_id: string;
+  next_id: string;
+  years_since: number;
+  rating: "G" | "F" | "P" | "X" | "NA";
+  strict: boolean;
+  reason: string;
+};
+
+export type EnginePairCheck = {
+  a_id: string;
+  b_id: string;
+  rating: "C" | "K" | "A" | "X";
+  strict: boolean;
+  reason: string;
+};
+
+export type EngineMixCheck = {
+  crop_ids: string[];
+  valid: boolean;
+  reasons: string[];
+  never: EnginePairCheck[];
+  avoid: EnginePairCheck[];
+  conditional: EnginePairCheck[];
+};
+
+export type EngineCrop = { crop_id: string; crop: string; family: string; group: string };
+
+// Engine unreachable, timed out, misconfigured or failed (5xx). Map to the
+// contract's 503 { code, message, retryable } response; never substitute a result.
+export class EngineUnavailableError extends Error {
+  readonly code = "ENGINE_UNAVAILABLE";
+  readonly retryable = true;
+}
+
+// Engine rejected the request (4xx). `engineStatus` is the engine's status,
+// not the end user's: a 401 here means the server's engine token is wrong.
+export class EngineRequestError extends Error {
+  constructor(message: string, readonly engineStatus: number) {
+    super(message);
+  }
+}
+
+async function engineRequest<T>(path: string, body?: unknown): Promise<T & { kb_version: string }> {
+  const baseUrl = process.env.CROPCYCLE_ENGINE_URL;
+  if (!baseUrl) throw new EngineUnavailableError("CROPCYCLE_ENGINE_URL is not configured.");
+
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const token = process.env.CROPCYCLE_ENGINE_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(ENGINE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new EngineUnavailableError("The CropCycle engine could not be reached.", { cause: error });
+  }
+
+  const payload: unknown = await response.json().catch(() => null);
+  if (response.status >= 500) {
+    throw new EngineUnavailableError(`The CropCycle engine failed with HTTP ${response.status}.`);
+  }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload
+      ? JSON.stringify(payload.detail)
+      : `HTTP ${response.status}`;
+    throw new EngineRequestError(`The CropCycle engine rejected the request: ${detail}`, response.status);
+  }
+  if (!payload || typeof payload !== "object" || !("kb_version" in payload)) {
+    throw new EngineUnavailableError("The CropCycle engine returned an unexpected response.");
+  }
+  return payload as T & { kb_version: string };
+}
+
+export function engineCrops() {
+  return engineRequest<{ crops: EngineCrop[] }>("/crops");
+}
+
+export function engineSoilVerdict(cropId: string, reading: EngineSoilReading) {
+  return engineRequest<{ verdict: EngineSoilVerdict }>("/soil/verdict", { crop_id: cropId, reading });
+}
+
+export function engineEligibleCrops(reading: EngineSoilReading) {
+  return engineRequest<{ verdicts: EngineSoilVerdict[] }>("/soil/eligible", { reading });
+}
+
+export function engineRotationCheck(prevId: string, nextId: string, yearsSince: number) {
+  return engineRequest<{ check: EngineRotationCheck }>("/rotation/check", {
+    prev_id: prevId,
+    next_id: nextId,
+    years_since: yearsSince,
+  });
+}
+
+export function enginePairCheck(aId: string, bId: string) {
+  return engineRequest<{ check: EnginePairCheck }>("/companion/pair", { a_id: aId, b_id: bId });
+}
+
+export function engineMixCheck(cropIds: string[]) {
+  return engineRequest<{ check: EngineMixCheck }>("/companion/mix", { crop_ids: cropIds });
 }
