@@ -29,6 +29,11 @@ enum FarmingMethod {
   NOT_RECORDED
 }
 
+enum UserTimeFormat {
+  H12
+  H24
+}
+
 enum FarmStatus {
   ACTIVE
   INACTIVE
@@ -100,6 +105,10 @@ model User {
   role                UserRole         @default(FARMER)
   emailVerifiedAt     DateTime?
   disabledAt          DateTime?
+  profileBio          String?          @db.VarChar(1000)
+  avatarUrl           String?          @db.VarChar(2048)
+  emailNotifications  Boolean          @default(true)
+  timeFormat          UserTimeFormat   @default(H12)
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   farmerProfile       Farmer?          @relation("FarmerUser")

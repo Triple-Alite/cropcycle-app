@@ -18,7 +18,7 @@ export async function GET() {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-    const [farmers, farms, plots, seasons, readings, recommendations, outcomes, serviceVisits] = await Promise.all([
+    const [farmers, farms, plots, seasons, readings, recommendations, outcomes, serviceVisits, profile] = await Promise.all([
       prisma.farmer.findMany({
         where: farmerWhere(user),
         select: {
@@ -91,11 +91,37 @@ export async function GET() {
         orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
         take: 200,
       }),
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          email: true,
+          name: true,
+          profileBio: true,
+          avatarUrl: true,
+          emailNotifications: true,
+          timeFormat: true,
+          farmerProfile: {
+            select: { phone: true, location: true, farmingMethod: true },
+          },
+        },
+      }),
     ]);
+    if (!profile) return NextResponse.json({ error: "The signed-in profile could not be found." }, { status: 404 });
 
     return NextResponse.json({
       farmer: user.name,
       role: publicRole(user.role),
+      profile: {
+        email: profile.email,
+        name: profile.name,
+        bio: profile.profileBio ?? "",
+        avatarUrl: profile.avatarUrl,
+        emailNotifications: profile.emailNotifications,
+        timeFormat: profile.timeFormat,
+        phone: profile.farmerProfile?.phone ?? "",
+        location: profile.farmerProfile?.location ?? "",
+        farming: profile.farmerProfile ? farmingMethodLabel(profile.farmerProfile.farmingMethod) : "Not recorded",
+      },
       farmers: farmers.map((farmer) => ({
         id: farmer.farmerCode,
         name: farmer.name,
