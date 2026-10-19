@@ -16,6 +16,19 @@ export type SheetDbSyncResult = {
   duplicates: number;
   skipped: number;
   issues: string[];
+  diagnostics: {
+    rowCount: number;
+    headers: string[];
+    firstRow: {
+      nodeIdPresent: boolean;
+      seasonPresent: boolean;
+      timestampPresent: boolean;
+      timestampValid: boolean;
+    } | null;
+    rowsWithNodeId: number;
+    rowsWithSeason: number;
+    rowsWithTimestamp: number;
+  };
 };
 
 function normalizeHeader(header: string) {
@@ -142,15 +155,31 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
   }
 
   const rows = payload as SheetRow[];
-  const result: SheetDbSyncResult = { imported: 0, duplicates: 0, skipped: 0, issues: [] };
+  const result: SheetDbSyncResult = {
+    imported: 0,
+    duplicates: 0,
+    skipped: 0,
+    issues: [],
+    diagnostics: {
+      rowCount: rows.length,
+      headers: rows[0] ? Object.keys(rows[0]).slice(0, 20).map((key) => key.slice(0, 80)) : [],
+      firstRow: null,
+      rowsWithNodeId: 0,
+      rowsWithSeason: 0,
+      rowsWithTimestamp: 0,
+    },
+  };
   const issue = (rowNumber: number, reason: string) => {
     result.skipped += 1;
     if (result.issues.length < 20) result.issues.push(`Row ${rowNumber}: ${reason}`);
   };
   const parsedRows = rows.map((row, index) => {
+    const nodeIdCell = getCell(row, ["Node_ID", "Node ID"]);
+    const seasonCell = getCell(row, ["Season"]);
+    const timestampCell = getCell(row, ["TimeStamp", "Timestamp"]);
     const nodeId = stringCell(getCell(row, ["Node_ID", "Node ID"]));
     const seasonName = stringCell(getCell(row, ["Season"]));
-    const recordedAt = parseTimestamp(getCell(row, ["TimeStamp", "Timestamp"]));
+    const recordedAt = parseTimestamp(timestampCell);
     const nitrogen = parseNumber(getCell(row, ["Nitrogen_mg_k", "Nitrogen_mg_kg", "Nitrogen"]));
     const phosphorus = parseNumber(getCell(row, ["Phosphorus_ m", "Phosphorus_mg", "Phosphorus_mg_kg", "Phosphorus"]));
     const potassium = parseNumber(getCell(row, ["Potassium_mg", "Potassium_mg_kg", "Potassium"]));
@@ -161,7 +190,10 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
       rowNumber: index + 2,
       row,
       nodeId,
+      nodeIdPresent: stringCell(nodeIdCell).length > 0,
       seasonName,
+      seasonPresent: stringCell(seasonCell).length > 0,
+      timestampPresent: stringCell(timestampCell).length > 0,
       recordedAt,
       nitrogen,
       phosphorus,
@@ -171,10 +203,27 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
       humidity,
     };
   });
+  const firstRow = parsedRows[0];
+  if (firstRow) {
+    result.diagnostics.firstRow = {
+      nodeIdPresent: firstRow.nodeIdPresent,
+      seasonPresent: firstRow.seasonPresent,
+      timestampPresent: firstRow.timestampPresent,
+      timestampValid: firstRow.recordedAt !== null,
+    };
+  }
+  result.diagnostics.rowsWithNodeId = parsedRows.filter((row) => row.nodeIdPresent).length;
+  result.diagnostics.rowsWithSeason = parsedRows.filter((row) => row.seasonPresent).length;
+  result.diagnostics.rowsWithTimestamp = parsedRows.filter((row) => row.timestampPresent).length;
 
   const validRows = parsedRows.filter((row) => {
-    if (!row.nodeId || !row.seasonName || !row.recordedAt) {
-      issue(row.rowNumber, "Node_ID, Season, and a valid TimeStamp are required.");
+    if (!row.nodeIdPresent || !row.seasonPresent || !row.recordedAt) {
+      const missing = [
+        !row.nodeIdPresent ? "Node_ID" : "",
+        !row.seasonPresent ? "Season" : "",
+        !row.recordedAt ? (row.timestampPresent ? "valid TimeStamp" : "TimeStamp") : "",
+      ].filter(Boolean);
+      issue(row.rowNumber, `Missing or invalid ${missing.join(", ")}.`);
       return false;
     }
     if (

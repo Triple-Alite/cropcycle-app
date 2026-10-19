@@ -351,11 +351,33 @@ export function DeviceManagementWorkspace() {
     setError("");
     setNotice("");
     try {
-      const result = await apiRequest<{ imported: number; duplicates: number; skipped: number; issues: string[] }>(
+      const result = await apiRequest<{
+        imported: number;
+        duplicates: number;
+        skipped: number;
+        issues: string[];
+        diagnostics: {
+          rowCount: number;
+          headers: string[];
+          firstRow: {
+            nodeIdPresent: boolean;
+            seasonPresent: boolean;
+            timestampPresent: boolean;
+            timestampValid: boolean;
+          } | null;
+          rowsWithNodeId: number;
+          rowsWithSeason: number;
+          rowsWithTimestamp: number;
+        };
+      }>(
         "/api/integrations/sheetdb/sync",
         { method: "POST", body: JSON.stringify({}) },
       );
-      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}`);
+      const row = result.diagnostics.firstRow;
+      const diagnostics = result.skipped
+        ? ` SheetDB returned ${result.diagnostics.rowCount} rows. Headers: ${result.diagnostics.headers.join(", ") || "none"}. Row 2 fields: Node ID ${row?.nodeIdPresent ? "present" : "missing"}, Season ${row?.seasonPresent ? "present" : "missing"}, Timestamp ${row?.timestampPresent ? (row.timestampValid ? "valid" : "present but invalid") : "missing"}. Across rows: Node ID ${result.diagnostics.rowsWithNodeId}, Season ${result.diagnostics.rowsWithSeason}, Timestamp ${result.diagnostics.rowsWithTimestamp}.`
+        : "";
+      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}${diagnostics}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to sync SheetDB readings.");
     } finally {
