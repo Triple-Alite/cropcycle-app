@@ -20,7 +20,14 @@ export async function PATCH(
     const input = body as Record<string, unknown>;
     const device = await prisma.device.findUnique({ where: { deviceCode }, select: { id: true } });
     if (!device) return validationError("Device not found.", 404);
-    const data: { status?: DeviceStatus; ownership?: DeviceOwnership; firmware?: string | null; farmId?: string | null; plotId?: string | null } = {};
+    const data: {
+      status?: DeviceStatus;
+      ownership?: DeviceOwnership;
+      firmware?: string | null;
+      externalNodeId?: string | null;
+      farmId?: string | null;
+      plotId?: string | null;
+    } = {};
 
     if (input.status !== undefined) {
       if (typeof input.status !== "string" || !statuses.has(input.status as DeviceStatus)) {
@@ -39,6 +46,12 @@ export async function PATCH(
         return validationError("Firmware version must be 80 characters or fewer.");
       }
       data.firmware = input.firmware.trim() || null;
+    }
+    if (input.externalNodeId !== undefined) {
+      if (typeof input.externalNodeId !== "string" || input.externalNodeId.trim().length > 100) {
+        return validationError("SheetDB Node ID must be 100 characters or fewer.");
+      }
+      data.externalNodeId = input.externalNodeId.trim() || null;
     }
 
     let nextFarmId: string | null | undefined;
@@ -95,7 +108,7 @@ export async function PATCH(
         data.farmId = nextFarmId ?? null;
         data.plotId = nextPlotId ?? null;
       }
-      return tx.device.update({ where: { id: device.id }, data, select: { deviceCode: true, status: true } });
+      return tx.device.update({ where: { id: device.id }, data, select: { deviceCode: true, status: true, externalNodeId: true } });
     });
     return NextResponse.json({ device: updated });
   } catch (error) {

@@ -27,6 +27,7 @@ type DeviceOption = { deviceCode: string; farmCode: string; status: string };
 type DeviceRecord = {
   id: string;
   deviceCode: string;
+  externalNodeId: string;
   apiKeyConfigured: boolean;
   type: string;
   status: "ACTIVE" | "INACTIVE" | "MAINTENANCE" | "RETIRED";
@@ -234,6 +235,7 @@ export function DeviceManagementWorkspace() {
   const [farmId, setFarmId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [syncingSheetDb, setSyncingSheetDb] = useState(false);
   const [issuedCredential, setIssuedCredential] = useState<{ deviceCode: string; apiKey: string } | null>(null);
 
   async function refreshInventory() {
@@ -269,6 +271,7 @@ export function DeviceManagementWorkspace() {
           type: String(data.get("type") ?? ""),
           ownership: String(data.get("ownership") ?? "CROPCYCLE"),
           firmware: String(data.get("firmware") ?? ""),
+          externalNodeId: String(data.get("externalNodeId") ?? ""),
           farmCode: String(data.get("farmCode") ?? ""),
           plotCode: String(data.get("plotCode") ?? ""),
         }),
@@ -301,6 +304,7 @@ export function DeviceManagementWorkspace() {
         body: JSON.stringify({
           status: String(data.get("status") ?? ""),
           ownership: String(data.get("ownership") ?? ""),
+          externalNodeId: String(data.get("externalNodeId") ?? ""),
           farmCode: String(data.get("farmCode") ?? ""),
           plotCode: String(data.get("plotCode") ?? ""),
         }),
@@ -342,6 +346,23 @@ export function DeviceManagementWorkspace() {
     }
   }
 
+  async function syncSheetDb() {
+    setSyncingSheetDb(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiRequest<{ imported: number; duplicates: number; skipped: number; issues: string[] }>(
+        "/api/integrations/sheetdb/sync",
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to sync SheetDB readings.");
+    } finally {
+      setSyncingSheetDb(false);
+    }
+  }
+
   return <div className="service-workspace">
     <div className="page-heading-row"><div><div className="date-eyebrow">CROPCYCLE ADMIN · SERVICE ASSETS</div><h1>Device operations</h1><p>Register CropCycle equipment, manage farm assignments and track device status.</p></div></div>
     <div className="device-workspace-grid">
@@ -350,6 +371,7 @@ export function DeviceManagementWorkspace() {
         <form className="data-form" onSubmit={registerDevice}>
           <label>Device code<input name="deviceCode" minLength={2} maxLength={100} required placeholder="e.g. CC-SOIL-0001"/></label>
           <label>Device type<input name="type" minLength={2} maxLength={80} required placeholder="e.g. Soil sensor"/></label>
+          <label>SheetDB Node ID (optional)<input name="externalNodeId" maxLength={100} placeholder="Matches Node_ID in SheetDB"/></label>
           <div className="form-grid"><label>Ownership<select name="ownership" defaultValue="CROPCYCLE"><option value="CROPCYCLE">CropCycle</option><option value="CUSTOMER">Customer-owned</option></select></label><label>Firmware version<input name="firmware" maxLength={80} placeholder="Optional"/></label></div>
           <label>Assign to farm (optional)<select name="farmCode" value={farmId} onChange={(event) => setFarmId(event.target.value)}><option value="">Unassigned</option>{inventory.farms.map((farm) => <option key={farm.farmCode} value={farm.farmCode}>{farm.name}</option>)}</select></label>
           <label>Assign to field (optional)<select name="plotCode" defaultValue=""><option value="">Farm-wide assignment</option>{inventory.plots.filter((plot) => plot.farmCode === farmId).map((plot) => <option key={plot.plotCode} value={plot.plotCode}>{plot.name}</option>)}</select></label>
@@ -359,7 +381,7 @@ export function DeviceManagementWorkspace() {
         </form>
       </section>
       <section className="panel device-inventory-panel">
-        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div>
+        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><div><button className="quiet-link" type="button" disabled={syncingSheetDb} onClick={() => void syncSheetDb()}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button> <button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div></div>
         {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>                 : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice} onRotateKey={rotateDeviceKey}/>)}
       </section>
     </div>
@@ -385,10 +407,12 @@ function DeviceRecordCard({
   return <article className="device-record">
     <div className="device-record-heading"><div><strong>{device.deviceCode}</strong><small>{device.type} · {device.ownership === "CROPCYCLE" ? "CropCycle-owned" : "Customer-owned"}</small></div><span className={`service-status service-status-${device.status.toLowerCase().replace("_", "-")}`}>{device.status.replace("_", " ")}</span></div>
     <div className="device-record-meta"><span>{device.farm || "Unassigned"}{device.plot ? ` · ${device.plot}` : ""}</span><span>{device.firmware ? `Firmware ${device.firmware}` : "Firmware not recorded"}</span><span>{device.lastConnectedAt ? `Last connected ${new Date(device.lastConnectedAt).toLocaleString()}` : "No connection recorded"}</span></div>
+    <div className="device-record-meta"><span>SheetDB Node ID: {device.externalNodeId || "Not mapped"}</span></div>
     <div className="device-key-actions"><span>{device.apiKeyConfigured ? "API key configured" : "No API key issued"}</span><button type="button" className="quiet-link" disabled={saving} onClick={() => onRotateKey(device)}>{device.apiKeyConfigured ? "Rotate API key" : "Issue API key"}</button></div>
     <form className="device-update-form" onSubmit={(event) => onSubmit(event, device)}>
       <div className="form-grid"><label>Status<select name="status" defaultValue={device.status}><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option><option value="MAINTENANCE">Maintenance</option><option value="RETIRED">Retired</option></select></label><label>Ownership<select name="ownership" defaultValue={device.ownership}><option value="CROPCYCLE">CropCycle</option><option value="CUSTOMER">Customer-owned</option></select></label></div>
       <div className="form-grid"><label>Farm assignment<select name="farmCode" value={farmCode} onChange={(event) => { setFarmCode(event.target.value); setPlotCode(""); }}><option value="">Unassigned</option>{inventory.farms.map((farm) => <option key={farm.farmCode} value={farm.farmCode}>{farm.name}</option>)}</select></label><label>Field assignment<select name="plotCode" value={plotCode} onChange={(event) => setPlotCode(event.target.value)}><option value="">Farm-wide assignment</option>{inventory.plots.filter((plot) => plot.farmCode === farmCode).map((plot) => <option key={plot.plotCode} value={plot.plotCode}>{plot.name}</option>)}</select></label></div>
+      <label>SheetDB Node ID<input name="externalNodeId" maxLength={100} defaultValue={device.externalNodeId} placeholder="Matches Node_ID in SheetDB"/></label>
       <button className="button button-outline" disabled={saving}>{saving ? "Saving…" : "Save device changes"}</button>
     </form>
   </article>;

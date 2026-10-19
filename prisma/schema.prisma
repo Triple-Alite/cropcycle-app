@@ -311,6 +311,7 @@ model SeasonRequirement {
 model Device {
   id             String           @id @default(cuid())
   deviceCode     String           @unique @db.VarChar(100)
+  externalNodeId String?          @unique @db.VarChar(100)
   apiKeyHash     String?          @unique @db.VarChar(64)
   type           String           @db.VarChar(80)
   status         DeviceStatus     @default(ACTIVE)

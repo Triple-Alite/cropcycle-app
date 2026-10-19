@@ -34,6 +34,7 @@ export async function GET() {
         return {
           id: device.id,
           deviceCode: device.deviceCode,
+          externalNodeId: device.externalNodeId ?? "",
           apiKeyConfigured: Boolean(device.apiKeyHash),
           type: device.type,
           status: device.status,
@@ -76,6 +77,10 @@ export async function POST(request: NextRequest) {
     if (input.firmware !== undefined && (typeof input.firmware !== "string" || input.firmware.length > 80)) {
       return validationError("Firmware version must be 80 characters or fewer.");
     }
+    if (input.externalNodeId !== undefined &&
+      (typeof input.externalNodeId !== "string" || input.externalNodeId.trim().length > 100)) {
+      return validationError("SheetDB Node ID must be 100 characters or fewer.");
+    }
     const deviceCode = input.deviceCode.trim();
     const type = input.type.trim();
 
@@ -101,6 +106,7 @@ export async function POST(request: NextRequest) {
           deviceCode,
           apiKeyHash: hashDeviceApiKey(apiKey),
           type,
+          externalNodeId: typeof input.externalNodeId === "string" ? input.externalNodeId.trim() || null : null,
           ownership: ownership as DeviceOwnership,
           firmware: typeof input.firmware === "string" && input.firmware.trim() ? input.firmware.trim() : null,
           registeredById: user.id,

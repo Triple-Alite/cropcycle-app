@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/integrations/sheetdb/sync",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

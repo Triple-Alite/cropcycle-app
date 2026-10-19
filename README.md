@@ -57,6 +57,18 @@ Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RE
 
 Apply the Prisma schema before exercising database-backed workflows. Run migrations and validate signup/login, farm and season access controls, outcome capture, recommendation history, and reading synchronization against the configured PostgreSQL database. The browser queue is device-local and is not a substitute for server backup.
 
+## Importing soil readings from SheetDB
+
+Create an API for the Google Sheet in the SheetDB dashboard and keep the API URL and any access token in server-only Vercel environment variables:
+
+- `SHEETDB_API_URL`: the HTTPS SheetDB API URL, such as `https://sheetdb.io/api/v1/<api-id>`.
+- `SHEETDB_API_TOKEN`: optional; set this if access-token authentication is enabled for the SheetDB API.
+- `CRON_SECRET`: a long random secret used to authenticate Vercel's scheduled sync.
+
+Never add the SheetDB URL or token to client-side code or share its credentials in chat. In **Device operations**, set each device's **SheetDB Node ID** to the matching `Node_ID` value and assign the device to its farm and field. The importer matches the `Season` cell exactly to a season created for that field. It imports timestamps and N/P/K (mg/kg), moisture (%), temperature (°C), and humidity (%); latitude, longitude, altitude, and satellite count are retained as sensor metadata. Rows that cannot be mapped or have invalid values are skipped with reasons shown after a manual sync.
+
+Once the variables and database migration are deployed, admins can select **Sync SheetDB** in Device operations. Vercel also runs the sync once daily at approximately 04:00 UTC; Vercel Hobby plans only support daily schedules, while higher plans can be configured for more frequent schedules. The sync is idempotent by Node ID and timestamp, so importing the same rows again does not create duplicate readings.
+
 The soil reading API and Crop Scientist rule criteria use the same five parameters: nitrogen, phosphorus and potassium in ppm; soil temperature in °C; and humidity in percent. The UI uses Montserrat with the primary brand colors `#CCF863`, `#00410B` and `#FFFFFF`.
 
 ## Hardware soil-reading endpoint
