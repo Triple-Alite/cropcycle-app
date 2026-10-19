@@ -55,7 +55,7 @@ Production deployment still requires environment-specific security review, datab
 
 Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RESET_EMAIL_API_KEY`, and the public HTTPS base URL in `CROPCYCLE_APP_URL`. The email endpoint must accept a bearer-authenticated `POST` with the recipient, the `cropcycle-password-reset` template name, and a `resetUrl` in its template data. For account privacy, reset requests return the same generic response whether or not an account exists; email delivery failures are recorded in the server logs.
 
-Apply the Prisma schema before exercising database-backed workflows. Run migrations and validate signup/login, farm and season access controls, outcome capture, recommendation history, and reading synchronization against the configured PostgreSQL database. The browser queue is device-local and is not a substitute for server backup.
+Apply the Prisma schema before exercising database-backed workflows. Vercel Production builds run `prisma migrate deploy` before building the app; Preview builds skip migrations. Other deployment targets must run `npm run db:deploy` against the intended database. Validate signup/login, farm and season access controls, outcome capture, recommendation history, and reading synchronization against the configured PostgreSQL database. The browser queue is device-local and is not a substitute for server backup.
 
 ## Importing soil readings from SheetDB
 
