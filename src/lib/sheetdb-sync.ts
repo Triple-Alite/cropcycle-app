@@ -18,6 +18,9 @@ export type SheetDbSyncResult = {
   issues: string[];
   diagnostics: {
     rowCount: number;
+    matchedRows: number;
+    ignoredRows: number;
+    targetNodeId: string;
     headers: string[];
     firstRow: {
       nodeIdPresent: boolean;
@@ -123,6 +126,8 @@ function compoundKey(...values: string[]) {
 export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
   const apiUrl = process.env.SHEETDB_API_URL?.trim();
   if (!apiUrl) throw new Error("SheetDB is not configured. Set the server-side SHEETDB_API_URL environment variable.");
+  const targetNodeId = process.env.SHEETDB_NODE_ID?.trim();
+  if (!targetNodeId) throw new Error("SheetDB is not configured. Set SHEETDB_NODE_ID to the exact Node_ID to import.");
 
   let parsedUrl: URL;
   try {
@@ -154,26 +159,36 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
     throw new Error("This SheetDB response exceeds the 10,000-row safety limit. Split the sheet before syncing.");
   }
 
-  const rows = payload as SheetRow[];
+  const sheetRows = payload as SheetRow[];
+  const matchingRows = sheetRows.flatMap((row, index) =>
+    stringCell(getCell(row, ["Node_ID", "Node ID"])) === targetNodeId ? [{ row, index }] : [],
+  );
   const result: SheetDbSyncResult = {
     imported: 0,
     duplicates: 0,
     skipped: 0,
     issues: [],
     diagnostics: {
-      rowCount: rows.length,
-      headers: rows[0] ? Object.keys(rows[0]).slice(0, 20).map((key) => key.slice(0, 80)) : [],
+      rowCount: sheetRows.length,
+      matchedRows: matchingRows.length,
+      ignoredRows: sheetRows.length - matchingRows.length,
+      targetNodeId,
+      headers: sheetRows[0] ? Object.keys(sheetRows[0]).slice(0, 20).map((key) => key.slice(0, 80)) : [],
       firstRow: null,
       rowsWithNodeId: 0,
       rowsWithSeason: 0,
       rowsWithTimestamp: 0,
     },
   };
+  if (matchingRows.length === 0) {
+    result.issues.push(`No SheetDB rows matched Node_ID "${targetNodeId}". Check that SHEETDB_NODE_ID matches the sheet exactly.`);
+    return result;
+  }
   const issue = (rowNumber: number, reason: string) => {
     result.skipped += 1;
     if (result.issues.length < 20) result.issues.push(`Row ${rowNumber}: ${reason}`);
   };
-  const parsedRows = rows.map((row, index) => {
+  const parsedRows = matchingRows.map(({ row, index }) => {
     const nodeIdCell = getCell(row, ["Node_ID", "Node ID"]);
     const seasonCell = getCell(row, ["Season"]);
     const timestampCell = getCell(row, ["TimeStamp", "Timestamp"]);

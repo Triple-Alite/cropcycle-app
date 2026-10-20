@@ -358,6 +358,9 @@ export function DeviceManagementWorkspace() {
         issues: string[];
         diagnostics: {
           rowCount: number;
+          matchedRows: number;
+          ignoredRows: number;
+          targetNodeId: string;
           headers: string[];
           firstRow: {
             nodeIdPresent: boolean;
@@ -374,9 +377,10 @@ export function DeviceManagementWorkspace() {
         { method: "POST", body: JSON.stringify({}) },
       );
       const row = result.diagnostics.firstRow;
-      const diagnostics = result.skipped
-        ? ` SheetDB returned ${result.diagnostics.rowCount} rows. Headers: ${result.diagnostics.headers.join(", ") || "none"}. Row 2 fields: Node ID ${row?.nodeIdPresent ? "present" : "missing"}, Season ${row?.seasonPresent ? "present" : "missing"}, Timestamp ${row?.timestampPresent ? (row.timestampValid ? "valid" : "present but invalid") : "missing"}. Across rows: Node ID ${result.diagnostics.rowsWithNodeId}, Season ${result.diagnostics.rowsWithSeason}, Timestamp ${result.diagnostics.rowsWithTimestamp}.`
-        : "";
+      const diagnostics = ` Only Node_ID "${result.diagnostics.targetNodeId}" is imported; ${result.diagnostics.matchedRows} matched and ${result.diagnostics.ignoredRows} other rows ignored out of ${result.diagnostics.rowCount}.` +
+        (result.skipped
+          ? ` Headers: ${result.diagnostics.headers.join(", ") || "none"}. First matching row fields: Node ID ${row?.nodeIdPresent ? "present" : "missing"}, Season ${row?.seasonPresent ? "present" : "missing"}, Timestamp ${row?.timestampPresent ? (row.timestampValid ? "valid" : "present but invalid") : "missing"}.`
+          : "");
       setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}${diagnostics}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to sync SheetDB readings.");
