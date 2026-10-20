@@ -618,7 +618,7 @@ export default function Home() {
       {view === "soil" && <Soil readings={store.readings} queuedReadings={queuedReadings} offline={offline} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
       {view === "recommendations" && <Recommendations seasons={store.seasons} recommendations={store.recommendations} outcomes={store.outcomes} canReview={store.role === "Admin" || store.role === "Crop Scientist"} setModal={setModal} onGenerate={generateRecommendation} onReview={reviewRecommendation} onRecordOutcome={startOutcome}/>}
       {view === "serviceVisits" && store.role !== "Crop Scientist" && <ServiceVisitsWorkspace farms={store.farms} plots={store.plots} visits={store.serviceVisits} isAdmin={store.role === "Admin"} onRefresh={refreshWorkspace}/>}
-      {view === "devices" && store.role === "Admin" && <DeviceManagementWorkspace/>}
+      {view === "devices" && store.role === "Admin" && <DeviceManagementWorkspace onRefresh={refreshWorkspace}/>}
       {view === "knowledge" && (store.role === "Admin" || store.role === "Crop Scientist") && <KnowledgeLibrary setNotice={setNotice}/>}
       {view === "profile" && <ProfileWorkspace profile={store.profile} role={store.role} farms={store.farms} onRefresh={refreshWorkspace} onLogout={logout} onLoggedOut={(message) => { setSignedIn(false); setView("overview"); setNotice(message); }} onManageFarms={() => setView("farms")}/>}
     </div></main>

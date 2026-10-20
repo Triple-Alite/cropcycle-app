@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SyncStatus } from "@prisma/client";
+import { SyncStatus, UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, validationError } from "@/lib/api";
 import { requireSessionUser } from "@/lib/auth";
@@ -134,6 +134,20 @@ export async function POST(request: NextRequest) {
       },
     });
     return NextResponse.json({ reading: { id: reading.id, sync: reading.syncStatus } }, { status: 201 });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function DELETE() {
+  try {
+    const user = await requireSessionUser();
+    if (user.role !== UserRole.ADMIN) {
+      return validationError("Only CropCycle administrators can clear soil readings.", 403);
+    }
+
+    const result = await prisma.soilReading.deleteMany();
+    return NextResponse.json({ ok: true, deleted: result.count });
   } catch (error) {
     return errorResponse(error);
   }

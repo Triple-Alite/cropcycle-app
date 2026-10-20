@@ -76,6 +76,7 @@ export async function PATCH(
           nextPlotId = plot.id;
         }
       }
+
     } else if (input.plotCode !== undefined) {
       if (input.plotCode === null || input.plotCode === "") {
         assignmentChanged = true;
@@ -111,6 +112,28 @@ export async function PATCH(
       return tx.device.update({ where: { id: device.id }, data, select: { deviceCode: true, status: true, externalNodeId: true } });
     });
     return NextResponse.json({ device: updated });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ deviceCode: string }> },
+) {
+  try {
+    const user = await requireSessionUser();
+    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can delete devices.", 403);
+
+    const { deviceCode } = await params;
+    const device = await prisma.device.findUnique({
+      where: { deviceCode },
+      select: { id: true, deviceCode: true },
+    });
+    if (!device) return validationError("Device not found.", 404);
+
+    await prisma.device.delete({ where: { id: device.id } });
+    return NextResponse.json({ ok: true, deviceCode: device.deviceCode });
   } catch (error) {
     return errorResponse(error);
   }

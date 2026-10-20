@@ -228,7 +228,7 @@ export function ServiceVisitsWorkspace({
   </div>;
 }
 
-export function DeviceManagementWorkspace() {
+export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Promise<void> }) {
   const [inventory, setInventory] = useState<Inventory>({ devices: [], farms: [], plots: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -236,6 +236,10 @@ export function DeviceManagementWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [syncingSheetDb, setSyncingSheetDb] = useState(false);
+  const [deviceToDelete, setDeviceToDelete] = useState<DeviceRecord | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [confirmClearReadings, setConfirmClearReadings] = useState(false);
+  const [clearReadingsError, setClearReadingsError] = useState("");
   const [issuedCredential, setIssuedCredential] = useState<{ deviceCode: string; apiKey: string } | null>(null);
 
   async function refreshInventory() {
@@ -389,6 +393,53 @@ export function DeviceManagementWorkspace() {
     }
   }
 
+  async function confirmDeleteDevice() {
+    if (!deviceToDelete) return;
+    setSaving(true);
+    setDeleteError("");
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest(`/api/devices/${encodeURIComponent(deviceToDelete.deviceCode)}`, {
+        method: "DELETE",
+      });
+      setNotice(`${deviceToDelete.deviceCode} deleted.`);
+      setDeviceToDelete(null);
+      try {
+        await refreshInventory();
+      } catch {
+        setError("The device was deleted, but inventory could not refresh. Use Refresh to reload it.");
+      }
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : "Unable to delete device.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearAllReadings() {
+    setSaving(true);
+    setClearReadingsError("");
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiRequest<{ deleted: number }>("/api/soil-readings", {
+        method: "DELETE",
+      });
+      setNotice(`${result.deleted} soil ${result.deleted === 1 ? "reading" : "readings"} cleared.`);
+      setConfirmClearReadings(false);
+      try {
+        await onRefresh();
+      } catch {
+        setError("The readings were cleared, but the workspace could not refresh. Reload the page to see the updated readings.");
+      }
+    } catch (cause) {
+      setClearReadingsError(cause instanceof Error ? cause.message : "Unable to clear soil readings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return <div className="service-workspace">
     <div className="page-heading-row"><div><div className="date-eyebrow">CROPCYCLE ADMIN · SERVICE ASSETS</div><h1>Device operations</h1><p>Register CropCycle equipment, manage farm assignments and track device status.</p></div></div>
     <div className="device-workspace-grid">
@@ -407,11 +458,13 @@ export function DeviceManagementWorkspace() {
         </form>
       </section>
       <section className="panel device-inventory-panel">
-        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><div><button className="quiet-link" type="button" disabled={syncingSheetDb} onClick={() => void syncSheetDb()}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button> <button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div></div>
-        {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>                 : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice} onRotateKey={rotateDeviceKey}/>)}
+        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><div><button className="quiet-link" type="button" disabled={syncingSheetDb} onClick={() => void syncSheetDb()}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button> <button className="quiet-link" type="button" disabled={saving} onClick={() => { setClearReadingsError(""); setConfirmClearReadings(true); }}>Clear readings</button> <button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div></div>
+        {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>                 : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice} onRotateKey={rotateDeviceKey} onDelete={() => { setDeleteError(""); setDeviceToDelete(device); }}/>)}
       </section>
     </div>
     {issuedCredential && <section className="panel device-key-panel"><div><div className="section-kicker">DEVICE API CREDENTIAL · SHOWN ONCE</div><h2>{issuedCredential.deviceCode}</h2><p>Copy this key to the device configuration now. It will not be shown again; issuing another key revokes this one.</p></div><code>{issuedCredential.apiKey}</code><button type="button" className="quiet-link" onClick={() => setIssuedCredential(null)}>Hide key</button></section>}
+    {deviceToDelete && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeviceToDelete(null); }}><section className="data-dialog profile-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="device-delete-title"><div className="section-kicker">PLEASE CONFIRM</div><h2 id="device-delete-title">Are you sure you want to delete device</h2><p>{deviceToDelete.deviceCode} will be removed from device operations. Existing soil readings and service visits will be kept, but will no longer be linked to this device.</p>{deleteError && <div className="auth-message" role="alert">{deleteError}</div>}<div className="dialog-actions"><button type="button" className="button button-cancel" disabled={saving} onClick={() => setDeviceToDelete(null)}>Cancel</button><button type="button" className="button button-danger" disabled={saving} onClick={() => void confirmDeleteDevice()}>{saving ? "Deleting…" : "Yes, delete device"}</button></div></section></div>}
+    {confirmClearReadings && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setConfirmClearReadings(false); }}><section className="data-dialog profile-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-readings-title"><div className="section-kicker">IRREVERSIBLE ACTION</div><h2 id="clear-readings-title">Are you sure you want to clear all readings?</h2><p>This permanently deletes every soil reading in CropCycle, including readings from every farm, season, device, and source. Farms, devices, seasons, and service visits will remain.</p>{clearReadingsError && <div className="auth-message" role="alert">{clearReadingsError}</div>}<div className="dialog-actions"><button type="button" className="button button-cancel" disabled={saving} onClick={() => setConfirmClearReadings(false)}>Cancel</button><button type="button" className="button button-danger" disabled={saving} onClick={() => void clearAllReadings()}>{saving ? "Clearing…" : "Yes, clear all readings"}</button></div></section></div>}
   </div>;
 }
 
@@ -421,12 +474,14 @@ function DeviceRecordCard({
   saving,
   onSubmit,
   onRotateKey,
+  onDelete,
 }: {
   device: DeviceRecord;
   inventory: Inventory;
   saving: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>, device: DeviceRecord) => void;
   onRotateKey: (device: DeviceRecord) => void;
+  onDelete: () => void;
 }) {
   const [farmCode, setFarmCode] = useState(device.farmCode);
   const [plotCode, setPlotCode] = useState(device.plotCode);
@@ -435,6 +490,7 @@ function DeviceRecordCard({
     <div className="device-record-meta"><span>{device.farm || "Unassigned"}{device.plot ? ` · ${device.plot}` : ""}</span><span>{device.firmware ? `Firmware ${device.firmware}` : "Firmware not recorded"}</span><span>{device.lastConnectedAt ? `Last connected ${new Date(device.lastConnectedAt).toLocaleString()}` : "No connection recorded"}</span></div>
     <div className="device-record-meta"><span>SheetDB Node ID: {device.externalNodeId || "Not mapped"}</span></div>
     <div className="device-key-actions"><span>{device.apiKeyConfigured ? "API key configured" : "No API key issued"}</span><button type="button" className="quiet-link" disabled={saving} onClick={() => onRotateKey(device)}>{device.apiKeyConfigured ? "Rotate API key" : "Issue API key"}</button></div>
+    <div className="device-key-actions"><span>Device no longer in use?</span><button type="button" className="quiet-link" disabled={saving} onClick={onDelete}>Delete device</button></div>
     <form className="device-update-form" onSubmit={(event) => onSubmit(event, device)}>
       <div className="form-grid"><label>Status<select name="status" defaultValue={device.status}><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option><option value="MAINTENANCE">Maintenance</option><option value="RETIRED">Retired</option></select></label><label>Ownership<select name="ownership" defaultValue={device.ownership}><option value="CROPCYCLE">CropCycle</option><option value="CUSTOMER">Customer-owned</option></select></label></div>
       <div className="form-grid"><label>Farm assignment<select name="farmCode" value={farmCode} onChange={(event) => { setFarmCode(event.target.value); setPlotCode(""); }}><option value="">Unassigned</option>{inventory.farms.map((farm) => <option key={farm.farmCode} value={farm.farmCode}>{farm.name}</option>)}</select></label><label>Field assignment<select name="plotCode" value={plotCode} onChange={(event) => setPlotCode(event.target.value)}><option value="">Farm-wide assignment</option>{inventory.plots.filter((plot) => plot.farmCode === farmCode).map((plot) => <option key={plot.plotCode} value={plot.plotCode}>{plot.name}</option>)}</select></label></div>
