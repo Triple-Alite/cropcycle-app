@@ -11,7 +11,12 @@ function runNpm(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-if (process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production") {
+const sheetDbProjectId = "prj_KOCjBgRv1VyX9WKlYtmSzT3U0AsL";
+if (
+  process.env.VERCEL === "1" &&
+  process.env.VERCEL_ENV === "production" &&
+  process.env.VERCEL_PROJECT_ID === sheetDbProjectId
+) {
   runNpm(["run", "db:deploy"]);
 }
 
