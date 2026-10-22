@@ -1,4 +1,4 @@
-import { UserRole, UserTimeFormat } from "@prisma/client";
+import { UserLanguage, UserRole, UserTimeFormat } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, validationError } from "@/lib/api";
 import { requireSessionUser } from "@/lib/auth";
@@ -17,6 +17,7 @@ export async function PATCH(request: NextRequest) {
     const profileBio = input.bio;
     const notifications = input.emailNotifications;
     const timeFormat = input.timeFormat;
+    const language = input.language;
     const phone = input.phone;
     const location = input.location;
     const farmingValue = input.farming;
@@ -37,7 +38,8 @@ export async function PATCH(request: NextRequest) {
       typeof profileBio !== "string" ||
       profileBio.length > 1000 ||
       typeof notifications !== "boolean" ||
-      (timeFormat !== UserTimeFormat.H12 && timeFormat !== UserTimeFormat.H24)
+      (timeFormat !== UserTimeFormat.H12 && timeFormat !== UserTimeFormat.H24) ||
+      (language !== undefined && language !== UserLanguage.EN && language !== UserLanguage.YO && language !== UserLanguage.HA)
     ) {
       return validationError("Enter a valid name, bio, notification preference and time format.");
     }
@@ -60,6 +62,7 @@ export async function PATCH(request: NextRequest) {
           profileBio: profileBio.trim() || null,
           emailNotifications: notifications,
           timeFormat,
+          ...(language === undefined ? {} : { language }),
         },
       });
       if (farmer && user.role === UserRole.FARMER) {

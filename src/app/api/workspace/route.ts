@@ -42,7 +42,15 @@ export async function GET() {
       }),
       prisma.season.findMany({
         where: { farm: farmWhere(user) },
-        include: seasonInclude,
+        include: {
+          ...seasonInclude,
+          soilReadings: {
+            where: { syncStatus: "SYNCED" },
+            orderBy: { recordedAt: "desc" },
+            take: 1,
+            select: { recordedAt: true },
+          },
+        },
         orderBy: { createdAt: "desc" },
       }),
       prisma.soilReading.findMany({
@@ -100,6 +108,7 @@ export async function GET() {
           avatarUrl: true,
           emailNotifications: true,
           timeFormat: true,
+          language: true,
           farmerProfile: {
             select: { phone: true, location: true, farmingMethod: true },
           },
@@ -118,6 +127,7 @@ export async function GET() {
         avatarUrl: profile.avatarUrl,
         emailNotifications: profile.emailNotifications,
         timeFormat: profile.timeFormat,
+        language: profile.language,
         phone: profile.farmerProfile?.phone ?? "",
         location: profile.farmerProfile?.location ?? "",
         farming: profile.farmerProfile ? farmingMethodLabel(profile.farmerProfile.farmingMethod) : "Not recorded",
@@ -160,6 +170,13 @@ export async function GET() {
           plot: season.plot.name,
           name: season.name,
           crop: currentCrops.join(" + ") || "Not recorded",
+          hasAssessmentCrops: Boolean(
+            currentCrops.length ||
+            season.requirement?.intendedCrops.length ||
+            season.requirement?.availableCrops.length ||
+            season.requirement?.marketableCrops.length,
+          ),
+          latestReadingAt: season.soilReadings[0]?.recordedAt.toISOString() ?? null,
           available: season.requirement?.availableCrops.join(", ") ?? "",
           market: season.requirement?.marketableCrops.join(", ") ?? "",
           previousCrops: season.crops.filter((crop) => crop.recordType === "PREVIOUS").map((crop) => crop.name),

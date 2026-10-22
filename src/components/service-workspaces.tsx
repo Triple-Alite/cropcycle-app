@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Localize } from "@/lib/language";
 
 type FarmOption = { id: string; name: string };
 type PlotOption = { id: string; farmId?: string; name: string };
@@ -191,7 +192,7 @@ export function ServiceVisitsWorkspace({
     }
   }
 
-  return <div className="service-workspace">
+  return <Localize><div className="service-workspace">
     <div className="page-heading-row">
       <div><div className="date-eyebrow">{isAdmin ? "CROPCYCLE OPERATIONS" : "FARM SUPPORT"}</div><h1>Service visits</h1><p>{isAdmin ? "Schedule requests, assign service staff and track maintenance through completion." : "Request a visit for your farm and follow its status here."}</p></div>
     </div>
@@ -225,7 +226,7 @@ export function ServiceVisitsWorkspace({
         </article>)}
       </section>
     </div>
-  </div>;
+  </div></Localize>;
 }
 
 export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Promise<void> }) {
@@ -440,7 +441,7 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
     }
   }
 
-  return <div className="service-workspace">
+  return <Localize><div className="service-workspace">
     <div className="page-heading-row"><div><div className="date-eyebrow">CROPCYCLE ADMIN · SERVICE ASSETS</div><h1>Device operations</h1><p>Register CropCycle equipment, manage farm assignments and track device status.</p></div></div>
     <div className="device-workspace-grid">
       <section className="panel device-register-panel">
@@ -465,7 +466,7 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
     {issuedCredential && <section className="panel device-key-panel"><div><div className="section-kicker">DEVICE API CREDENTIAL · SHOWN ONCE</div><h2>{issuedCredential.deviceCode}</h2><p>Copy this key to the device configuration now. It will not be shown again; issuing another key revokes this one.</p></div><code>{issuedCredential.apiKey}</code><button type="button" className="quiet-link" onClick={() => setIssuedCredential(null)}>Hide key</button></section>}
     {deviceToDelete && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeviceToDelete(null); }}><section className="data-dialog profile-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="device-delete-title"><div className="section-kicker">PLEASE CONFIRM</div><h2 id="device-delete-title">Are you sure you want to delete device</h2><p>{deviceToDelete.deviceCode} will be removed from device operations. Existing soil readings and service visits will be kept, but will no longer be linked to this device.</p>{deleteError && <div className="auth-message" role="alert">{deleteError}</div>}<div className="dialog-actions"><button type="button" className="button button-cancel" disabled={saving} onClick={() => setDeviceToDelete(null)}>Cancel</button><button type="button" className="button button-danger" disabled={saving} onClick={() => void confirmDeleteDevice()}>{saving ? "Deleting…" : "Yes, delete device"}</button></div></section></div>}
     {confirmClearReadings && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setConfirmClearReadings(false); }}><section className="data-dialog profile-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-readings-title"><div className="section-kicker">IRREVERSIBLE ACTION</div><h2 id="clear-readings-title">Are you sure you want to clear all readings?</h2><p>This permanently deletes every soil reading in CropCycle, including readings from every farm, season, device, and source. Farms, devices, seasons, and service visits will remain.</p>{clearReadingsError && <div className="auth-message" role="alert">{clearReadingsError}</div>}<div className="dialog-actions"><button type="button" className="button button-cancel" disabled={saving} onClick={() => setConfirmClearReadings(false)}>Cancel</button><button type="button" className="button button-danger" disabled={saving} onClick={() => void clearAllReadings()}>{saving ? "Clearing…" : "Yes, clear all readings"}</button></div></section></div>}
-  </div>;
+  </div></Localize>;
 }
 
 function DeviceRecordCard({
@@ -485,7 +486,7 @@ function DeviceRecordCard({
 }) {
   const [farmCode, setFarmCode] = useState(device.farmCode);
   const [plotCode, setPlotCode] = useState(device.plotCode);
-  return <article className="device-record">
+  return <Localize><article className="device-record">
     <div className="device-record-heading"><div><strong>{device.deviceCode}</strong><small>{device.type} · {device.ownership === "CROPCYCLE" ? "CropCycle-owned" : "Customer-owned"}</small></div><span className={`service-status service-status-${device.status.toLowerCase().replace("_", "-")}`}>{device.status.replace("_", " ")}</span></div>
     <div className="device-record-meta"><span>{device.farm || "Unassigned"}{device.plot ? ` · ${device.plot}` : ""}</span><span>{device.firmware ? `Firmware ${device.firmware}` : "Firmware not recorded"}</span><span>{device.lastConnectedAt ? `Last connected ${new Date(device.lastConnectedAt).toLocaleString()}` : "No connection recorded"}</span></div>
     <div className="device-record-meta"><span>SheetDB Node ID: {device.externalNodeId || "Not mapped"}</span></div>
@@ -497,5 +498,5 @@ function DeviceRecordCard({
       <label>SheetDB Node ID<input name="externalNodeId" maxLength={100} defaultValue={device.externalNodeId} placeholder="Matches Node_ID in SheetDB"/></label>
       <button className="button button-outline" disabled={saving}>{saving ? "Saving…" : "Save device changes"}</button>
     </form>
-  </article>;
+  </article></Localize>;
 }

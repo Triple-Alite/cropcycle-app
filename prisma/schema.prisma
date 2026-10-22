@@ -34,6 +34,12 @@ enum UserTimeFormat {
   H24
 }
 
+enum UserLanguage {
+  EN
+  YO
+  HA
+}
+
 enum FarmStatus {
   ACTIVE
   INACTIVE
@@ -109,6 +115,7 @@ model User {
   avatarUrl           String?          @db.VarChar(2048)
   emailNotifications  Boolean          @default(true)
   timeFormat          UserTimeFormat   @default(H12)
+  language            UserLanguage     @default(EN)
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   farmerProfile       Farmer?          @relation("FarmerUser")

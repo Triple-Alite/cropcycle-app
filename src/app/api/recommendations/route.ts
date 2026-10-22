@@ -1,4 +1,4 @@
-import { KnowledgeStatus, Prisma, RecommendationStatus } from "@prisma/client";
+import { KnowledgeStatus, Prisma, RecommendationStatus, UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { parseKnowledgeBody } from "@/lib/agricultural-knowledge";
 import { errorResponse, validationError } from "@/lib/api";
@@ -6,6 +6,15 @@ import { requireSessionUser } from "@/lib/auth";
 import { ActiveRule, assessCrops, SeasonRecommendationContext } from "@/lib/recommendation-engine";
 import { farmWhere, farmingMethodLabel, hasFarmPermission, recommendationWhere } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
+
+function hasSameReadingSnapshot(snapshot: Prisma.JsonValue, recordedAt: string) {
+  if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) return false;
+  const soil = snapshot.soil;
+  return typeof soil === "object" &&
+    soil !== null &&
+    !Array.isArray(soil) &&
+    soil.recordedAt === recordedAt;
+}
 
 export async function GET() {
   try {
@@ -39,6 +48,13 @@ export async function POST(request: NextRequest) {
     if (!body || typeof body !== "object" || !("seasonId" in body) || typeof body.seasonId !== "string") {
       return validationError("Choose a season to review.");
     }
+    if ("automatic" in body && typeof body.automatic !== "boolean") {
+      return validationError("Automatic assessment flag must be true or false.");
+    }
+    const automatic = "automatic" in body && body.automatic === true;
+    if (automatic && user.role !== UserRole.ADMIN) {
+      return validationError("Only administrators can prepare automatic assessment drafts.", 403);
+    }
     const season = await prisma.season.findFirst({
       where: {
         id: body.seasonId,
@@ -64,7 +80,12 @@ export async function POST(request: NextRequest) {
 
     const [reading, approvedRules] = await Promise.all([
       prisma.soilReading.findFirst({
-        where: { farmId: season.farmId, plotId: season.plotId, seasonId: season.id },
+        where: {
+          farmId: season.farmId,
+          plotId: season.plotId,
+          seasonId: season.id,
+          syncStatus: "SYNCED",
+        },
         orderBy: { recordedAt: "desc" },
         select: {
           nitrogen: true,
@@ -147,6 +168,9 @@ export async function POST(request: NextRequest) {
         recordedAt: reading?.recordedAt.toISOString() ?? null,
       },
     };
+    if (automatic && !context.soil.recordedAt) {
+      return validationError("A synced soil reading is required before preparing an assessment.", 409);
+    }
     const result = assessCrops(context, activeRules);
     const citedRuleIds = new Set(
       result.candidates.flatMap((candidate) => candidate.knowledge.map((rule) => rule.id)),
@@ -154,6 +178,16 @@ export async function POST(request: NextRequest) {
     const citedRules = activeRules.filter((rule) => citedRuleIds.has(rule.id));
 
     const recommendation = await prisma.$transaction(async (tx) => {
+      if (automatic && context.soil.recordedAt) {
+        const latestRecommendation = await tx.recommendation.findFirst({
+          where: { seasonId: season.id },
+          orderBy: { createdAt: "desc" },
+          select: { inputSnapshot: true },
+        });
+        if (latestRecommendation && hasSameReadingSnapshot(latestRecommendation.inputSnapshot, context.soil.recordedAt)) {
+          return null;
+        }
+      }
       const latest = await tx.recommendation.aggregate({
         where: { seasonId: season.id },
         _max: { version: true },
@@ -245,7 +279,8 @@ export async function POST(request: NextRequest) {
       });
     }, { isolationLevel: "Serializable" });
 
-    return NextResponse.json({ recommendation, result }, { status: 201 });
+    if (!recommendation) return NextResponse.json({ alreadyAssessed: true });
+    return NextResponse.json({ recommendation, result, alreadyAssessed: false }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
       return validationError("A recommendation was created at the same time. Refresh the history and try again.", 409);

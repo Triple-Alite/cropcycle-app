@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { Localize } from "@/lib/language";
 import Image from "next/image";
 
 export type ProfileData = {
@@ -10,6 +11,7 @@ export type ProfileData = {
   avatarUrl: string | null;
   emailNotifications: boolean;
   timeFormat: "H12" | "H24";
+  language: "EN" | "YO" | "HA";
   phone: string;
   location: string;
   farming: string;
@@ -65,6 +67,7 @@ export function ProfileWorkspace({
   const [farming, setFarming] = useState(profile.farming);
   const [emailNotifications, setEmailNotifications] = useState(profile.emailNotifications);
   const [timeFormat, setTimeFormat] = useState(profile.timeFormat);
+  const [language, setLanguage] = useState(profile.language);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -82,7 +85,7 @@ export function ProfileWorkspace({
     try {
       await profileRequest("/api/profile", {
         method: "PATCH",
-        body: JSON.stringify({ name, bio, phone, location, farming, emailNotifications, timeFormat }),
+        body: JSON.stringify({ name, bio, phone, location, farming, emailNotifications, timeFormat, language }),
       });
       await onRefresh();
       setNotice("Profile and settings saved.");
@@ -171,7 +174,7 @@ export function ProfileWorkspace({
     }
   }
 
-  return <div className="profile-workspace">
+  return <Localize><div className="profile-workspace">
     <div className="page-heading-row">
       <div><div className="date-eyebrow">ACCOUNT · PERSONAL DETAILS AND SETTINGS</div><h1>Your profile</h1><p>Keep your farmer information up to date and manage your account.</p></div>
     </div>
@@ -196,6 +199,7 @@ export function ProfileWorkspace({
         <div className="section-kicker profile-settings-kicker">SETTINGS</div><h2>Preferences</h2>
         <label className="profile-toggle"><span><strong>Email notifications</strong><small>Receive CropCycle updates and service notifications by email.</small></span><input type="checkbox" checked={emailNotifications} onChange={(event) => setEmailNotifications(event.target.checked)}/></label>
         <label>Time display<select value={timeFormat} onChange={(event) => setTimeFormat(event.target.value as "H12" | "H24")}><option value="H12">12-hour clock</option><option value="H24">24-hour clock</option></select></label>
+        <label>Language<select value={language} onChange={(event) => setLanguage(event.target.value as "EN" | "YO" | "HA")}><option value="EN">English</option><option value="YO">Yoruba</option><option value="HA">Hausa</option></select></label>
         <button className="button button-dark" disabled={busy}>{busy ? "Saving…" : "Save profile and settings"}</button>
       </section>
     </form>
@@ -221,5 +225,5 @@ export function ProfileWorkspace({
     </section>
 
     {pendingAction && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingAction(null); }}><section className="data-dialog profile-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="profile-confirm-title"><div className="section-kicker">PLEASE CONFIRM</div><h2 id="profile-confirm-title">{pendingAction === "logout" ? "Are you sure you want to log out?" : "Are you sure you want to delete your account?"}</h2><p>{pendingAction === "logout" ? "You can log back in at any time with your email and password." : "This will disable your login. Your farmer record, farms, and soil history will remain in CropCycle."}</p><div className="dialog-actions"><button type="button" className="button button-cancel" disabled={busy} onClick={() => setPendingAction(null)}>Cancel</button><button type="button" className={pendingAction === "delete" ? "button button-danger" : "button button-dark"} disabled={busy} onClick={() => void confirmPendingAction()}>{busy ? "Please wait…" : pendingAction === "logout" ? "Yes, log out" : "Yes, delete account"}</button></div></section></div>}
-  </div>;
+  </div></Localize>;
 }

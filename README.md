@@ -26,9 +26,9 @@ The schema is in `prisma/schema.prisma`; `registerFarmer` in `src/lib/farmers.ts
 
 ## Farmer profiles and profile photos
 
-The signed-in avatar opens the profile workspace. Farmers can edit their name, bio, phone, location and farming method; upload a JPEG, PNG or WebP profile photo (up to 4 MB); manage email-notification and 12/24-hour display preferences; change their password; and manage farms through the Farms workspace. Log out and account deactivation both require confirmation. Deactivation disables login and revokes sessions while retaining the farmer, farm and soil-history records.
+The signed-in avatar opens the profile workspace. Farmers can edit their name, bio, phone, location and farming method; upload a JPEG, PNG or WebP profile photo (up to 4 MB); manage email-notification, 12/24-hour display, and English/Yoruba/Hausa language preferences; change their password; and manage farms through the Farms workspace. Language changes apply to the application interface after saving; farmer-entered records and expert-authored recommendation content remain unchanged. Log out and account deactivation both require confirmation. Deactivation disables login and revokes sessions while retaining the farmer, farm and soil-history records.
 
-Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and make its `BLOB_READ_WRITE_TOKEN` available to the production deployment (and Preview if needed). Profile images are stored with public access so they can display in the avatar. Apply the Prisma migration with `npm run db:deploy` before deploying the profile APIs. Email notification preferences are saved, but notification delivery must be configured separately; the language selector is deferred until translated interface text is available.
+Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and make its `BLOB_READ_WRITE_TOKEN` available to the production deployment (and Preview if needed). Profile images are stored with public access so they can display in the avatar. Apply pending Prisma migrations with `npm run db:deploy` before deploying profile APIs. Email notification preferences are saved, but notification delivery must be configured separately.
 
 ## Included in this prototype
 
