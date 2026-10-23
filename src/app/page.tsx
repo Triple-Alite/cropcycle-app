@@ -13,6 +13,7 @@ type Farm = { id: string; ownerId?: string; name: string; location: string; area
 type Plot = { id: string; farmId?: string; farm: string; name: string; area: number; location: string; latitude?: number; longitude?: number };
 type Season = { id: string; farmId?: string; plotId?: string; farm: string; plot: string; name: string; crop: string; previousCrops?: string[]; latestReadingAt?: string | null; hasAssessmentCrops?: boolean; available?: string; market?: string; method: string; status: string };
 type Reading = { id: string; farmerId?: string; farmId?: string; farm?: string; plotId?: string; seasonId?: string; deviceId?: string; timestamp?: string; plot: string; date: string; nitrogen: number | null; phosphorus: number | null; potassium: number | null; soilTemperature: number | null; humidity: number | null; sync: string };
+type SoilDevice = { id: string; deviceCode: string; externalNodeId: string; farmId: string; farm: string };
 type QueuedReading = {
   idempotencyKey: string;
   plotCode: string;
@@ -109,7 +110,7 @@ type KnowledgeRuleRecord = {
 };
 type View = "overview" | "farmers" | "farms" | "seasons" | "soil" | "recommendations" | "knowledge" | "serviceVisits" | "devices" | "profile";
 type Modal = "farmer" | "farm" | "plot" | "season" | "reading" | "outcome" | null;
-type Store = { farmers: Farmer[]; farms: Farm[]; plots: Plot[]; seasons: Season[]; readings: Reading[]; recommendations: SavedRecommendation[]; outcomes: Outcome[]; serviceVisits: ServiceVisit[]; farmer: string; role: Role; profile: ProfileData };
+type Store = { farmers: Farmer[]; farms: Farm[]; plots: Plot[]; seasons: Season[]; readings: Reading[]; devices: SoilDevice[]; recommendations: SavedRecommendation[]; outcomes: Outcome[]; serviceVisits: ServiceVisit[]; farmer: string; role: Role; profile: ProfileData };
 const seed: Store = {
   farmer: "Amina Yusuf", role: "Field Agent",
   profile: { email: "", name: "Amina Yusuf", bio: "", avatarUrl: null, emailNotifications: true, timeFormat: "H12", language: "EN", phone: "", location: "", farming: "Mixed farming" },
@@ -118,6 +119,7 @@ const seed: Store = {
   plots: [{ id: "AGR-PL-000401", farm: "Green Valley Farm", name: "North Field", area: 6, location: "Kaduna North" }, { id: "AGR-PL-000402", farm: "Green Valley Farm", name: "South Ridge", area: 4.5, location: "Kaduna North" }, { id: "AGR-PL-000403", farm: "Green Valley Farm", name: "East Meadow", area: 3.5, location: "Kaduna North" }, { id: "AGR-PL-000404", farm: "Green Valley Farm", name: "River Flat", area: 4.5, location: "Kaduna North" }, { id: "AGR-PL-000501", farm: "Riverbend Fields", name: "Plot 01", area: 4, location: "Zaria" }, { id: "AGR-PL-000502", farm: "Riverbend Fields", name: "Plot 02", area: 4, location: "Zaria" }, { id: "AGR-PL-000503", farm: "Riverbend Fields", name: "Plot 03", area: 4, location: "Zaria" }],
   seasons: [{ id: "S-2026-014", farm: "Green Valley Farm", plot: "North Field", name: "2026 wet season", crop: "Maize + cowpea", method: "Mixed farming", status: "In progress" }, { id: "S-2026-011", farm: "Riverbend Fields", plot: "Plot 02", name: "2026 wet season", crop: "Sorghum", method: "Mono-cropping", status: "Review due" }, { id: "S-2025-037", farm: "Green Valley Farm", plot: "North Field", name: "2025 dry season", crop: "Groundnut", method: "Mono-cropping", status: "Completed" }],
   readings: [],
+  devices: [],
   recommendations: [],
   outcomes: [],
   serviceVisits: [],
@@ -230,7 +232,7 @@ export default function Home() {
   const [plotFarmId, setPlotFarmId] = useState("");
   const [farmerDraft, setFarmerDraft] = useState<Farmer | null>(null);
   const [selectedOutcomeSeasonId, setSelectedOutcomeSeasonId] = useState("");
-  const [syncingSheetDbFromSoil, setSyncingSheetDbFromSoil] = useState(false);
+  const [syncingSheetDbDevices, setSyncingSheetDbDevices] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState("");
   const online = useSyncExternalStore(
     subscribeToOnlineStatus,
@@ -246,23 +248,26 @@ export default function Home() {
   const refreshWorkspace = useCallback(async () => {
     setStore(await requestJson<Store>("/api/workspace"));
   }, []);
-  const syncSheetDbFromSoil = useCallback(async () => {
-    setSyncingSheetDbFromSoil(true);
+  const syncSheetDbDevice = useCallback(async (device: SoilDevice) => {
+    setSyncingSheetDbDevices((current) => ({ ...current, [device.id]: true }));
     try {
       const result = await requestJson<{
         imported: number;
         duplicates: number;
         skipped: number;
         recommendationsPrepared: number;
-      }>("/api/integrations/sheetdb/sync", { method: "POST", body: JSON.stringify({}) });
+      }>("/api/integrations/sheetdb/sync", {
+        method: "POST",
+        body: JSON.stringify({ deviceId: device.id }),
+      });
       await refreshWorkspace();
       setNotice(
-        `SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped, ${result.recommendationsPrepared} recommendation drafts prepared.`,
+        `${device.deviceCode} sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped, ${result.recommendationsPrepared} recommendation drafts prepared.`,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to sync SheetDB readings.");
+      setNotice(error instanceof Error ? error.message : `Unable to sync readings for ${device.deviceCode}.`);
     } finally {
-      setSyncingSheetDbFromSoil(false);
+      setSyncingSheetDbDevices((current) => ({ ...current, [device.id]: false }));
     }
   }, [refreshWorkspace]);
   const persistQueuedReadings = useCallback((next: QueuedReading[]) => {
@@ -637,7 +642,7 @@ export default function Home() {
       {view === "farmers" && <Farmers farmers={store.farmers} canRegister={store.role === "Admin" || store.role === "Field Agent"} canEdit={store.role === "Admin" || store.role === "Field Agent" || store.role === "Farmer"} onNew={() => { setFarmerDraft(null); setModal("farmer"); }} onEdit={(farmer) => { setFarmerDraft(farmer); setModal("farmer"); }}/ >}
       {view === "farms" && <Farms farms={farms} total={store.farms.length} query={query} setQuery={setQuery} plots={store.plots} setModal={setModal} seasons={store.seasons} onAddPlot={(farmId) => { setPlotFarmId(farmId); setModal("plot"); }}/>}
       {view === "seasons" && <Seasons seasons={store.seasons} setModal={setModal}/>}
-      {view === "soil" && <Soil farms={store.farms} seasons={store.seasons} readings={store.readings} queuedReadings={queuedReadings} offline={offline} canSyncSheetDb={store.role === "Admin" || store.role === "Farmer"} syncingSheetDb={syncingSheetDbFromSoil} onSyncSheetDb={syncSheetDbFromSoil} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
+      {view === "soil" && <Soil farms={store.farms} seasons={store.seasons} devices={store.devices} readings={store.readings} queuedReadings={queuedReadings} offline={offline} syncingDevices={syncingSheetDbDevices} onSyncDevice={(device) => void syncSheetDbDevice(device)} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
       {view === "recommendations" && <Recommendations seasons={store.seasons} recommendations={store.recommendations} outcomes={store.outcomes} canReview={store.role === "Admin" || store.role === "Crop Scientist"} pendingReview={store.role === "Farmer" && store.seasons.some((season) => season.latestReadingAt && (season.status === "In progress" || season.status === "Planning") && !store.recommendations.some((recommendation) => recommendation.seasonId === season.id && recommendation.result.dataUsed.soil.recordedAt === season.latestReadingAt))} setModal={setModal} onGenerate={generateRecommendation} onReview={reviewRecommendation} onRecordOutcome={startOutcome}/>}
       {view === "serviceVisits" && store.role !== "Crop Scientist" && <ServiceVisitsWorkspace farms={store.farms} plots={store.plots} visits={store.serviceVisits} isAdmin={store.role === "Admin"} onRefresh={refreshWorkspace}/>}
       {view === "devices" && store.role === "Admin" && <DeviceManagementWorkspace onRefresh={refreshWorkspace}/>}
@@ -777,7 +782,7 @@ function Farms({ farms, total, query, setQuery, plots, setModal, seasons, onAddP
 function Seasons({ seasons, setModal }: { seasons: Season[]; setModal: (modal: Modal) => void }) {
   return <Localize><><PageTitle kicker="SEASONAL MEMORY · HISTORY THAT CARRIES FORWARD" title="Seasons" description="Past and present, recorded without overwriting what came before." action="＋ Start a season" onClick={() => setModal("season")}/><section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">ALL SEASONS</div><h2>{seasons.length} records</h2></div><span className="table-caption">FARM · PLOT · CROP · METHOD</span></div>{seasons.length ? seasons.map((season,index) => <article className="season-history-row" key={season.id}><span className={`history-number history-${index%3}`}>{String(seasons.length-index).padStart(2,"0")}</span><div className="history-main"><div className="season-title">{season.name}<Badge text={season.status}/></div><div className="season-meta">{season.farm}<span>·</span>{season.plot}</div></div><div className="history-crop"><small>CROP(S)</small><strong>{season.crop}</strong></div><div className="history-method"><small>METHOD</small><strong>{season.method}</strong></div><span className="history-id">{season.id}</span></article>) : <Empty title="Your season history starts here" detail="Create a season to record crops, farming methods and requirements." action="＋ Start a season" onClick={() => setModal("season")}/>}</section><Note text="New seasons can reuse previous crop history automatically. Each season keeps its own soil readings and requirements."/></></Localize>;
 }
-function Soil({ farms, seasons, readings, queuedReadings, offline, canSyncSheetDb, syncingSheetDb, onSyncSheetDb, setModal, onRetry, onDiscard }: { farms: Farm[]; seasons: Season[]; readings: Reading[]; queuedReadings: QueuedReading[]; offline: boolean; canSyncSheetDb: boolean; syncingSheetDb: boolean; onSyncSheetDb: () => void; setModal: (modal: Modal) => void; onRetry: (idempotencyKey: string) => void; onDiscard: (idempotencyKey: string) => void }) {
+function Soil({ farms, seasons, devices, readings, queuedReadings, offline, syncingDevices, onSyncDevice, setModal, onRetry, onDiscard }: { farms: Farm[]; seasons: Season[]; devices: SoilDevice[]; readings: Reading[]; queuedReadings: QueuedReading[]; offline: boolean; syncingDevices: Record<string, boolean>; onSyncDevice: (device: SoilDevice) => void; setModal: (modal: Modal) => void; onRetry: (idempotencyKey: string) => void; onDiscard: (idempotencyKey: string) => void }) {
   const [selectedFarmId, setSelectedFarmId] = useState("ALL");
   const selectedReadings = readings.filter((reading) =>
     selectedFarmId === "ALL" || reading.farmId === selectedFarmId,
@@ -787,6 +792,9 @@ function Soil({ farms, seasons, readings, queuedReadings, offline, canSyncSheetD
     const season = seasons.find((item) => item.id === reading.seasonId);
     return season?.farmId === selectedFarmId;
   });
+  const selectedDevices = devices.filter((device) =>
+    selectedFarmId === "ALL" || device.farmId === selectedFarmId,
+  );
   return <Localize><>
     <PageTitle kicker="FIELD DATA · PLOT-SPECIFIC HISTORY" title="Soil readings" description="Record NPK, soil temperature and humidity for each plot and season." action="＋ Record reading" onClick={() => setModal("reading")} />
     <div className="soil-intro-grid">
@@ -794,7 +802,8 @@ function Soil({ farms, seasons, readings, queuedReadings, offline, canSyncSheetD
       <div className="soil-stat panel"><span>⌁</span><small>SERVER READINGS</small><strong>{String(selectedReadings.length).padStart(2, "0")}</strong><span>{selectedFarmId === "ALL" ? "Across all tracked farms" : farms.find((farm) => farm.id === selectedFarmId)?.name ?? "Selected farm"}</span></div>
     </div>
     <section className="panel list-page-panel readings-table-panel">
-      <div className="panel-header"><div><div className="section-kicker">READING HISTORY</div><h2>Recent measurements</h2></div><div className="soil-reading-actions"><label className="soil-farm-filter">Farm<select value={selectedFarmId} onChange={(event) => setSelectedFarmId(event.target.value)}><option value="ALL">All farms</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label>{canSyncSheetDb && <button type="button" className="button button-outline" disabled={syncingSheetDb || offline} onClick={onSyncSheetDb}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button>}</div></div>
+      <div className="panel-header"><div><div className="section-kicker">READING HISTORY</div><h2>Recent measurements</h2></div><label className="soil-farm-filter">Farm<select value={selectedFarmId} onChange={(event) => setSelectedFarmId(event.target.value)}><option value="ALL">All farms</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label></div>
+      {selectedDevices.length > 0 && <div className="soil-device-sync-list" aria-label="Sync readings by device">{selectedDevices.map((device) => <article className="soil-device-sync-row" key={device.id}><span className="soil-device-icon">▣</span><div><strong>{device.deviceCode}</strong><small>{device.farm} · Node {device.externalNodeId}</small></div><button type="button" className="button button-outline" disabled={offline || syncingDevices[device.id]} onClick={() => onSyncDevice(device)}>{syncingDevices[device.id] ? "Syncing…" : "Sync readings ↻"}</button></article>)}</div>}
       <div className="readings-table-head"><span>READING / PLOT</span><span>NITROGEN</span><span>PHOSPHORUS</span><span>POTASSIUM</span><span>TEMP · HUMIDITY</span><span>SYNC STATUS</span></div>
       {selectedReadings.map((reading) => <div className="readings-table-row" key={reading.id}><div><strong>{reading.id}</strong><small>{reading.farm ? `${reading.farm} · ` : ""}{reading.plot} <span>·</span> {reading.date}</small></div><strong>{measurement(reading.nitrogen, "ppm")}</strong><strong>{measurement(reading.phosphorus, "ppm")}</strong><strong>{measurement(reading.potassium, "ppm")}</strong><strong>{reading.soilTemperature === null || reading.humidity === null ? "Not recorded" : `${reading.soilTemperature} °C · ${reading.humidity}%`}</strong><SyncStatus value={reading.sync} /></div>)}
       {selectedQueuedReadings.map((reading) => <div className="readings-table-row" key={reading.idempotencyKey}><div><strong>{reading.idempotencyKey.slice(0, 12)}</strong><small>{reading.plotCode} <span>·</span> {new Date(reading.recordedAt).toLocaleString()}</small>{reading.syncError && <small role="alert">{reading.syncError}</small>}</div><strong>{reading.nitrogen} ppm</strong><strong>{reading.phosphorus} ppm</strong><strong>{reading.potassium} ppm</strong><strong>{reading.soilTemperature} °C · {reading.humidity}%</strong><div className="queued-reading-actions"><SyncStatus value={reading.syncStatus === "PENDING" ? "Pending sync" : reading.syncStatus === "CONFLICT" ? "Conflict" : "Failed"} />{reading.syncStatus === "FAILED" && <button type="button" className="quiet-link" onClick={() => onRetry(reading.idempotencyKey)}>Retry</button>}{reading.syncStatus === "CONFLICT" && <small>Discard to resolve</small>}<button type="button" className="quiet-link" onClick={() => onDiscard(reading.idempotencyKey)}>Discard</button></div></div>)}

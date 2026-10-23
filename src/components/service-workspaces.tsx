@@ -236,7 +236,6 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
   const [farmId, setFarmId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [syncingSheetDb, setSyncingSheetDb] = useState(false);
   const [deviceToDelete, setDeviceToDelete] = useState<DeviceRecord | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmClearReadings, setConfirmClearReadings] = useState(false);
@@ -351,57 +350,6 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
     }
   }
 
-  async function syncSheetDb() {
-    setSyncingSheetDb(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await apiRequest<{
-        imported: number;
-        duplicates: number;
-        skipped: number;
-        recommendationsPrepared: number;
-        issues: string[];
-        diagnostics: {
-          rowCount: number;
-          matchedRows: number;
-          ignoredRows: number;
-          targetNodeId: string;
-          headers: string[];
-          firstRow: {
-            nodeIdPresent: boolean;
-            seasonPresent: boolean;
-            timestampPresent: boolean;
-            timestampValid: boolean;
-          } | null;
-          rowsWithNodeId: number;
-          rowsWithSeason: number;
-          rowsWithTimestamp: number;
-        };
-      }>(
-        "/api/integrations/sheetdb/sync",
-        { method: "POST", body: JSON.stringify({}) },
-      );
-      const row = result.diagnostics.firstRow;
-      const diagnostics = ` Only Node_ID "${result.diagnostics.targetNodeId}" is imported; ${result.diagnostics.matchedRows} matched and ${result.diagnostics.ignoredRows} other rows ignored out of ${result.diagnostics.rowCount}.` +
-        (result.skipped
-          ? ` Headers: ${result.diagnostics.headers.join(", ") || "none"}. First matching row fields: Node ID ${row?.nodeIdPresent ? "present" : "missing"}, Season ${row?.seasonPresent ? "present" : "missing"}, Timestamp ${row?.timestampPresent ? (row.timestampValid ? "valid" : "present but invalid") : "missing"}.`
-          : "");
-      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped, ${result.recommendationsPrepared} recommendation drafts prepared.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}${diagnostics}`);
-      try {
-        await onRefresh();
-      } catch (cause) {
-        setError(cause instanceof Error
-          ? `SheetDB sync succeeded, but the workspace could not refresh: ${cause.message}`
-          : "SheetDB sync succeeded, but the workspace could not refresh.");
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to sync SheetDB readings.");
-    } finally {
-      setSyncingSheetDb(false);
-    }
-  }
-
   async function confirmDeleteDevice() {
     if (!deviceToDelete) return;
     setSaving(true);
@@ -467,7 +415,7 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
         </form>
       </section>
       <section className="panel device-inventory-panel">
-        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><div><button className="quiet-link" type="button" disabled={syncingSheetDb} onClick={() => void syncSheetDb()}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button> <button className="quiet-link" type="button" disabled={saving} onClick={() => { setClearReadingsError(""); setConfirmClearReadings(true); }}>Clear readings</button> <button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div></div>
+        <div className="panel-header"><div><div className="section-kicker">DEVICE INVENTORY</div><h2>{inventory.devices.length} registered {inventory.devices.length === 1 ? "device" : "devices"}</h2></div><div><button className="quiet-link" type="button" disabled={saving} onClick={() => { setClearReadingsError(""); setConfirmClearReadings(true); }}>Clear readings</button> <button className="quiet-link" type="button" onClick={() => void refreshInventory().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to refresh device inventory."))}>Refresh ↻</button></div></div>
         {loading ? <p>Loading device inventory…</p> : inventory.devices.length === 0 ? <div className="empty-state"><span>▣</span><h3>No devices registered</h3><p>Newly registered equipment will appear here for assignment and service tracking.</p></div>                 : inventory.devices.map((device) => <DeviceRecordCard key={device.id} device={device} inventory={inventory} saving={saving} onSubmit={updateDevice} onRotateKey={rotateDeviceKey} onDelete={() => { setDeleteError(""); setDeviceToDelete(device); }}/>)}
       </section>
     </div>

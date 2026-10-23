@@ -18,7 +18,7 @@ export async function GET() {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-    const [farmers, farms, plots, seasons, readings, recommendations, outcomes, serviceVisits, profile] = await Promise.all([
+    const [farmers, farms, plots, seasons, readings, devices, recommendations, outcomes, serviceVisits, profile] = await Promise.all([
       prisma.farmer.findMany({
         where: farmerWhere(user),
         select: {
@@ -61,6 +61,30 @@ export async function GET() {
         },
         orderBy: { recordedAt: "desc" },
         take: 100,
+      }),
+      prisma.device.findMany({
+        where: {
+          status: "ACTIVE",
+          externalNodeId: { not: null },
+          OR: [
+            { farm: { is: farmWhere(user) } },
+            { assignments: { some: { releasedAt: null, farm: farmWhere(user) } } },
+          ],
+        },
+        select: {
+          id: true,
+          deviceCode: true,
+          externalNodeId: true,
+          farmId: true,
+          farm: { select: { farmCode: true, name: true } },
+          assignments: {
+            where: { releasedAt: null },
+            orderBy: { assignedAt: "desc" },
+            take: 1,
+            select: { farm: { select: { farmCode: true, name: true } } },
+          },
+        },
+        orderBy: { deviceCode: "asc" },
       }),
       prisma.recommendation.findMany({
         where: recommendationWhere(user),
@@ -205,6 +229,17 @@ export async function GET() {
         sync: reading.syncStatus === "SYNCED" ? "Synced" : "Pending sync",
         farm: reading.farm.name,
       })),
+      devices: devices.flatMap((device) => {
+        const assignedFarm = device.assignments[0]?.farm ?? device.farm;
+        if (!assignedFarm || !device.externalNodeId) return [];
+        return [{
+          id: device.id,
+          deviceCode: device.deviceCode,
+          externalNodeId: device.externalNodeId,
+          farmId: assignedFarm.farmCode,
+          farm: assignedFarm.name,
+        }];
+      }),
       recommendations: recommendations.map((recommendation) => ({
         id: recommendation.id,
         version: recommendation.version,

@@ -125,10 +125,10 @@ function compoundKey(...values: string[]) {
   return JSON.stringify(values);
 }
 
-export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
+export async function importSheetDbReadings(requestedNodeId?: string): Promise<SheetDbSyncResult> {
   const apiUrl = process.env.SHEETDB_API_URL?.trim();
   if (!apiUrl) throw new Error("SheetDB is not configured. Set the server-side SHEETDB_API_URL environment variable.");
-  const targetNodeId = process.env.SHEETDB_NODE_ID?.trim();
+  const targetNodeId = requestedNodeId?.trim() || process.env.SHEETDB_NODE_ID?.trim();
   if (!targetNodeId) throw new Error("SheetDB is not configured. Set SHEETDB_NODE_ID to the exact Node_ID to import.");
 
   let parsedUrl: URL;

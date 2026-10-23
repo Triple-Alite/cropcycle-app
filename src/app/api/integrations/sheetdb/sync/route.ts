@@ -19,9 +19,9 @@ function hasValidCronSecret(request: NextRequest) {
   return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
-async function sync() {
+async function sync(nodeId?: string) {
   try {
-    return NextResponse.json(await importSheetDbReadings(), {
+    return NextResponse.json(await importSheetDbReadings(nodeId), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
@@ -29,21 +29,29 @@ async function sync() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const user = await requireSessionUser();
-    if (user.role === UserRole.ADMIN) return await sync();
-    if (user.role !== UserRole.FARMER) {
-      return validationError("Only administrators or farmers linked to the synced device can sync SheetDB readings.", 403);
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return validationError("A valid JSON object is required.");
+    }
+    const input = body as Record<string, unknown>;
+    if (input.deviceId === undefined) {
+      if (user.role !== UserRole.ADMIN) {
+        return validationError("Choose one of your farm's registered devices to sync.", 400);
+      }
+      return await sync();
+    }
+    if (typeof input.deviceId !== "string" || !input.deviceId.trim()) {
+      return validationError("A valid device must be selected.");
     }
 
-    const targetNodeId = process.env.SHEETDB_NODE_ID?.trim();
-    if (!targetNodeId) {
-      return validationError("SheetDB is not configured. Ask an administrator to set SHEETDB_NODE_ID.", 503);
-    }
     const device = await prisma.device.findUnique({
-      where: { externalNodeId: targetNodeId },
+      where: { id: input.deviceId.trim() },
       select: {
+        externalNodeId: true,
+        status: true,
         farmId: true,
         assignments: {
           where: { releasedAt: null },
@@ -54,10 +62,13 @@ export async function POST() {
       },
     });
     const farmId = device?.assignments[0]?.farmId ?? device?.farmId;
-    if (!farmId || !await hasFarmPermission(user, farmId, "canRecordSoil")) {
-      return validationError("You must be linked to the farm assigned to the SheetDB device to sync its readings.", 403);
+    if (!device || device.status !== "ACTIVE" || !device.externalNodeId || !farmId) {
+      return validationError("This device is inactive, has no SheetDB Node ID, or is not assigned to a farm.", 409);
     }
-    return await sync();
+    if (user.role !== UserRole.ADMIN && !await hasFarmPermission(user, farmId, "canRecordSoil")) {
+      return validationError("You do not have permission to sync readings for this device's farm.", 403);
+    }
+    return await sync(device.externalNodeId);
   } catch (error) {
     return errorResponse(error);
   }
