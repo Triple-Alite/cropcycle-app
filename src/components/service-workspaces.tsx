@@ -360,6 +360,7 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
         imported: number;
         duplicates: number;
         skipped: number;
+        recommendationsPrepared: number;
         issues: string[];
         diagnostics: {
           rowCount: number;
@@ -386,7 +387,14 @@ export function DeviceManagementWorkspace({ onRefresh }: { onRefresh: () => Prom
         (result.skipped
           ? ` Headers: ${result.diagnostics.headers.join(", ") || "none"}. First matching row fields: Node ID ${row?.nodeIdPresent ? "present" : "missing"}, Season ${row?.seasonPresent ? "present" : "missing"}, Timestamp ${row?.timestampPresent ? (row.timestampValid ? "valid" : "present but invalid") : "missing"}.`
           : "");
-      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}${diagnostics}`);
+      setNotice(`SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped, ${result.recommendationsPrepared} recommendation drafts prepared.${result.issues.length ? ` First issue: ${result.issues[0]}` : ""}${diagnostics}`);
+      try {
+        await onRefresh();
+      } catch (cause) {
+        setError(cause instanceof Error
+          ? `SheetDB sync succeeded, but the workspace could not refresh: ${cause.message}`
+          : "SheetDB sync succeeded, but the workspace could not refresh.");
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to sync SheetDB readings.");
     } finally {

@@ -71,16 +71,30 @@ export function recommendationWhere(user: SessionUser): Prisma.RecommendationWhe
   }
   if (user.role === UserRole.FARMER) {
     return {
-      status: "SHARED",
+      OR: [
+        { status: "SHARED" },
+        { status: "NEEDS_REVIEW", provider: "cropcycle-crop-knowledge-base" },
+        { status: "ARCHIVED" },
+      ],
       farm: { owner: { userId: user.id } },
     };
   }
   return {
-    status: "SHARED",
-    OR: [
-      { farm: { owner: { createdById: user.id } } },
-      { farm: { owner: { userId: user.id } } },
-      { farm: { memberships: { some: { userId: user.id, canViewRecommendations: true } } } },
+    AND: [
+      {
+        OR: [
+          { status: "SHARED" },
+          { status: "NEEDS_REVIEW", provider: "cropcycle-crop-knowledge-base" },
+          { status: "ARCHIVED" },
+        ],
+      },
+      {
+        OR: [
+          { farm: { owner: { createdById: user.id } } },
+          { farm: { owner: { userId: user.id } } },
+          { farm: { memberships: { some: { userId: user.id, canViewRecommendations: true } } } },
+        ],
+      },
     ],
   };
 }

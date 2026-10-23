@@ -18,6 +18,9 @@ export type SeasonRecommendationContext = {
   marketableCrops: string[];
   previousCrops: string[];
   soil: {
+    moisture: number | null;
+    pH: number | null;
+    electricalConductivity: number | null;
     nitrogen: number | null;
     phosphorus: number | null;
     potassium: number | null;

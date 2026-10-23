@@ -12,7 +12,7 @@ type Farmer = { id: string; name: string; phone: string; location: string; farmi
 type Farm = { id: string; ownerId?: string; name: string; location: string; area: number; plots: number };
 type Plot = { id: string; farmId?: string; farm: string; name: string; area: number; location: string; latitude?: number; longitude?: number };
 type Season = { id: string; farmId?: string; plotId?: string; farm: string; plot: string; name: string; crop: string; previousCrops?: string[]; latestReadingAt?: string | null; hasAssessmentCrops?: boolean; available?: string; market?: string; method: string; status: string };
-type Reading = { id: string; farmerId?: string; farmId?: string; plotId?: string; seasonId?: string; deviceId?: string; timestamp?: string; plot: string; date: string; nitrogen: number | null; phosphorus: number | null; potassium: number | null; soilTemperature: number | null; humidity: number | null; sync: string };
+type Reading = { id: string; farmerId?: string; farmId?: string; farm?: string; plotId?: string; seasonId?: string; deviceId?: string; timestamp?: string; plot: string; date: string; nitrogen: number | null; phosphorus: number | null; potassium: number | null; soilTemperature: number | null; humidity: number | null; sync: string };
 type QueuedReading = {
   idempotencyKey: string;
   plotCode: string;
@@ -63,14 +63,14 @@ type RecommendationResult = {
   notice: string;
   candidates: Array<{
     crop: string;
-    suitability: "supported" | "review-needed" | "insufficient-data";
+    suitability: "supported" | "review-needed" | "insufficient-data" | "unsuitable";
     reasons: string[];
     alternatives: string[];
     considerations: string[];
     knowledge: Array<{ id: string; title: string; source: string; version: number }>;
   }>;
   dataUsed: {
-    soil: { nitrogen: number | null; phosphorus: number | null; potassium: number | null; soilTemperature: number | null; humidity: number | null; recordedAt: string | null };
+    soil: { moisture?: number | null; pH?: number | null; electricalConductivity?: number | null; nitrogen: number | null; phosphorus: number | null; potassium: number | null; soilTemperature: number | null; humidity: number | null; recordedAt: string | null };
     previousCrops: string[];
     intendedCrops: string[];
     availableCrops: string[];
@@ -83,6 +83,7 @@ type SavedRecommendation = {
   id: string;
   version: number;
   status: string;
+  provider: string | null;
   createdAt: string;
   reviewedAt: string | null;
   farm: string;
@@ -229,7 +230,7 @@ export default function Home() {
   const [plotFarmId, setPlotFarmId] = useState("");
   const [farmerDraft, setFarmerDraft] = useState<Farmer | null>(null);
   const [selectedOutcomeSeasonId, setSelectedOutcomeSeasonId] = useState("");
-  const autoAssessmentAttempts = useRef(new Set<string>());
+  const [syncingSheetDbFromSoil, setSyncingSheetDbFromSoil] = useState(false);
   const [notice, setNotice] = useState("");
   const online = useSyncExternalStore(
     subscribeToOnlineStatus,
@@ -245,6 +246,25 @@ export default function Home() {
   const refreshWorkspace = useCallback(async () => {
     setStore(await requestJson<Store>("/api/workspace"));
   }, []);
+  const syncSheetDbFromSoil = useCallback(async () => {
+    setSyncingSheetDbFromSoil(true);
+    try {
+      const result = await requestJson<{
+        imported: number;
+        duplicates: number;
+        skipped: number;
+        recommendationsPrepared: number;
+      }>("/api/integrations/sheetdb/sync", { method: "POST", body: JSON.stringify({}) });
+      await refreshWorkspace();
+      setNotice(
+        `SheetDB sync complete: ${result.imported} imported, ${result.duplicates} already present, ${result.skipped} skipped, ${result.recommendationsPrepared} recommendation drafts prepared.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to sync SheetDB readings.");
+    } finally {
+      setSyncingSheetDbFromSoil(false);
+    }
+  }, [refreshWorkspace]);
   const persistQueuedReadings = useCallback((next: QueuedReading[]) => {
     try {
       window.localStorage.setItem(QUEUE_KEY, JSON.stringify(next));
@@ -354,49 +374,6 @@ export default function Home() {
       mounted = false;
     };
   }, []);
-  useEffect(() => {
-    if (!signedIn || store.role !== "Admin") return;
-    const seasonsWithNewReadings = store.seasons.filter((season) =>
-      (season.status === "In progress" || season.status === "Planning") &&
-      season.latestReadingAt &&
-      season.hasAssessmentCrops &&
-      !store.recommendations.some((recommendation) =>
-        recommendation.seasonId === season.id &&
-        recommendation.result.dataUsed.soil.recordedAt === season.latestReadingAt,
-      ),
-    );
-    const pending = seasonsWithNewReadings.filter((season) => {
-      const key = `${season.id}:${season.latestReadingAt}`;
-      if (autoAssessmentAttempts.current.has(key)) return false;
-      autoAssessmentAttempts.current.add(key);
-      return true;
-    });
-    if (!pending.length) return;
-
-    void Promise.allSettled(pending.map((season) => requestJson<{ alreadyAssessed?: boolean }>("/api/recommendations", {
-      method: "POST",
-      body: JSON.stringify({ seasonId: season.id, automatic: true }),
-    }))).then(async (results) => {
-      if (results.some((result) => result.status === "fulfilled" && !result.value.alreadyAssessed)) {
-        setNotice("A new reading assessment was prepared for scientist review.");
-      }
-      const failed = results.find((result) => result.status === "rejected");
-      if (failed?.status === "rejected") {
-        setNotice(failed.reason instanceof Error
-          ? `Could not prepare a recommendation for scientist review: ${failed.reason.message}`
-          : "Could not prepare a recommendation for scientist review.");
-      }
-      if (results.some((result) => result.status === "fulfilled")) {
-        try {
-          await refreshWorkspace();
-        } catch (error) {
-          setNotice(error instanceof Error
-            ? `Drafts were prepared, but the workspace could not refresh: ${error.message}`
-            : "Drafts were prepared, but the workspace could not refresh.");
-        }
-      }
-    });
-  }, [signedIn, store.role, store.seasons, store.recommendations, refreshWorkspace]);
   useEffect(() => {
   if (!signedIn) return;
   let refreshing = false;
@@ -660,7 +637,7 @@ export default function Home() {
       {view === "farmers" && <Farmers farmers={store.farmers} canRegister={store.role === "Admin" || store.role === "Field Agent"} canEdit={store.role === "Admin" || store.role === "Field Agent" || store.role === "Farmer"} onNew={() => { setFarmerDraft(null); setModal("farmer"); }} onEdit={(farmer) => { setFarmerDraft(farmer); setModal("farmer"); }}/ >}
       {view === "farms" && <Farms farms={farms} total={store.farms.length} query={query} setQuery={setQuery} plots={store.plots} setModal={setModal} seasons={store.seasons} onAddPlot={(farmId) => { setPlotFarmId(farmId); setModal("plot"); }}/>}
       {view === "seasons" && <Seasons seasons={store.seasons} setModal={setModal}/>}
-      {view === "soil" && <Soil readings={store.readings} queuedReadings={queuedReadings} offline={offline} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
+      {view === "soil" && <Soil farms={store.farms} seasons={store.seasons} readings={store.readings} queuedReadings={queuedReadings} offline={offline} canSyncSheetDb={store.role === "Admin" || store.role === "Farmer"} syncingSheetDb={syncingSheetDbFromSoil} onSyncSheetDb={syncSheetDbFromSoil} setModal={setModal} onRetry={retryQueuedReading} onDiscard={discardQueuedReading}/>}
       {view === "recommendations" && <Recommendations seasons={store.seasons} recommendations={store.recommendations} outcomes={store.outcomes} canReview={store.role === "Admin" || store.role === "Crop Scientist"} pendingReview={store.role === "Farmer" && store.seasons.some((season) => season.latestReadingAt && (season.status === "In progress" || season.status === "Planning") && !store.recommendations.some((recommendation) => recommendation.seasonId === season.id && recommendation.result.dataUsed.soil.recordedAt === season.latestReadingAt))} setModal={setModal} onGenerate={generateRecommendation} onReview={reviewRecommendation} onRecordOutcome={startOutcome}/>}
       {view === "serviceVisits" && store.role !== "Crop Scientist" && <ServiceVisitsWorkspace farms={store.farms} plots={store.plots} visits={store.serviceVisits} isAdmin={store.role === "Admin"} onRefresh={refreshWorkspace}/>}
       {view === "devices" && store.role === "Admin" && <DeviceManagementWorkspace onRefresh={refreshWorkspace}/>}
@@ -800,44 +777,55 @@ function Farms({ farms, total, query, setQuery, plots, setModal, seasons, onAddP
 function Seasons({ seasons, setModal }: { seasons: Season[]; setModal: (modal: Modal) => void }) {
   return <Localize><><PageTitle kicker="SEASONAL MEMORY · HISTORY THAT CARRIES FORWARD" title="Seasons" description="Past and present, recorded without overwriting what came before." action="＋ Start a season" onClick={() => setModal("season")}/><section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">ALL SEASONS</div><h2>{seasons.length} records</h2></div><span className="table-caption">FARM · PLOT · CROP · METHOD</span></div>{seasons.length ? seasons.map((season,index) => <article className="season-history-row" key={season.id}><span className={`history-number history-${index%3}`}>{String(seasons.length-index).padStart(2,"0")}</span><div className="history-main"><div className="season-title">{season.name}<Badge text={season.status}/></div><div className="season-meta">{season.farm}<span>·</span>{season.plot}</div></div><div className="history-crop"><small>CROP(S)</small><strong>{season.crop}</strong></div><div className="history-method"><small>METHOD</small><strong>{season.method}</strong></div><span className="history-id">{season.id}</span></article>) : <Empty title="Your season history starts here" detail="Create a season to record crops, farming methods and requirements." action="＋ Start a season" onClick={() => setModal("season")}/>}</section><Note text="New seasons can reuse previous crop history automatically. Each season keeps its own soil readings and requirements."/></></Localize>;
 }
-function Soil({ readings, queuedReadings, offline, setModal, onRetry, onDiscard }: { readings: Reading[]; queuedReadings: QueuedReading[]; offline: boolean; setModal: (modal: Modal) => void; onRetry: (idempotencyKey: string) => void; onDiscard: (idempotencyKey: string) => void }) {
+function Soil({ farms, seasons, readings, queuedReadings, offline, canSyncSheetDb, syncingSheetDb, onSyncSheetDb, setModal, onRetry, onDiscard }: { farms: Farm[]; seasons: Season[]; readings: Reading[]; queuedReadings: QueuedReading[]; offline: boolean; canSyncSheetDb: boolean; syncingSheetDb: boolean; onSyncSheetDb: () => void; setModal: (modal: Modal) => void; onRetry: (idempotencyKey: string) => void; onDiscard: (idempotencyKey: string) => void }) {
+  const [selectedFarmId, setSelectedFarmId] = useState("ALL");
+  const selectedReadings = readings.filter((reading) =>
+    selectedFarmId === "ALL" || reading.farmId === selectedFarmId,
+  );
+  const selectedQueuedReadings = queuedReadings.filter((reading) => {
+    if (selectedFarmId === "ALL") return true;
+    const season = seasons.find((item) => item.id === reading.seasonId);
+    return season?.farmId === selectedFarmId;
+  });
   return <Localize><>
     <PageTitle kicker="FIELD DATA · PLOT-SPECIFIC HISTORY" title="Soil readings" description="Record NPK, soil temperature and humidity for each plot and season." action="＋ Record reading" onClick={() => setModal("reading")} />
     <div className="soil-intro-grid">
-      <div className="soil-intro panel"><div className="section-kicker">FIELD COLLECTION</div><h2>Capture first.<br />Sync when you can.</h2><p>Readings are stored locally when offline and synced with their stable IDs when connectivity returns.</p><div className={`offline-banner ${offline ? "offline-now" : ""}`}><i />{offline ? `${queuedReadings.length} reading(s) saved on this device.` : "Online. Pending readings sync automatically."}</div></div>
-      <div className="soil-stat panel"><span>⌁</span><small>SERVER READINGS</small><strong>{String(readings.length).padStart(2, "0")}</strong><span>Across all tracked plots</span></div>
+      <div className="soil-intro panel"><div className="section-kicker">FIELD COLLECTION</div><h2>Capture first.<br />Sync when you can.</h2><p>Readings are stored locally when offline and synced with their stable IDs when connectivity returns.</p><div className={`offline-banner ${offline ? "offline-now" : ""}`}><i />{offline ? `${selectedQueuedReadings.length} reading(s) saved on this device.` : "Online. Pending readings sync automatically."}</div></div>
+      <div className="soil-stat panel"><span>⌁</span><small>SERVER READINGS</small><strong>{String(selectedReadings.length).padStart(2, "0")}</strong><span>{selectedFarmId === "ALL" ? "Across all tracked farms" : farms.find((farm) => farm.id === selectedFarmId)?.name ?? "Selected farm"}</span></div>
     </div>
     <section className="panel list-page-panel readings-table-panel">
-      <div className="panel-header"><div><div className="section-kicker">READING HISTORY</div><h2>Recent measurements</h2></div><span className="table-caption">VALUES AS RECORDED</span></div>
+      <div className="panel-header"><div><div className="section-kicker">READING HISTORY</div><h2>Recent measurements</h2></div><div className="soil-reading-actions"><label className="soil-farm-filter">Farm<select value={selectedFarmId} onChange={(event) => setSelectedFarmId(event.target.value)}><option value="ALL">All farms</option>{farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}</select></label>{canSyncSheetDb && <button type="button" className="button button-outline" disabled={syncingSheetDb || offline} onClick={onSyncSheetDb}>{syncingSheetDb ? "Syncing SheetDB…" : "Sync SheetDB ↻"}</button>}</div></div>
       <div className="readings-table-head"><span>READING / PLOT</span><span>NITROGEN</span><span>PHOSPHORUS</span><span>POTASSIUM</span><span>TEMP · HUMIDITY</span><span>SYNC STATUS</span></div>
-      {readings.map((reading) => <div className="readings-table-row" key={reading.id}><div><strong>{reading.id}</strong><small>{reading.plot} <span>·</span> {reading.date}</small></div><strong>{measurement(reading.nitrogen, "ppm")}</strong><strong>{measurement(reading.phosphorus, "ppm")}</strong><strong>{measurement(reading.potassium, "ppm")}</strong><strong>{reading.soilTemperature === null || reading.humidity === null ? "Not recorded" : `${reading.soilTemperature} °C · ${reading.humidity}%`}</strong><SyncStatus value={reading.sync} /></div>)}
-      {queuedReadings.map((reading) => <div className="readings-table-row" key={reading.idempotencyKey}><div><strong>{reading.idempotencyKey.slice(0, 12)}</strong><small>{reading.plotCode} <span>·</span> {new Date(reading.recordedAt).toLocaleString()}</small>{reading.syncError && <small role="alert">{reading.syncError}</small>}</div><strong>{reading.nitrogen} ppm</strong><strong>{reading.phosphorus} ppm</strong><strong>{reading.potassium} ppm</strong><strong>{reading.soilTemperature} °C · {reading.humidity}%</strong><div className="queued-reading-actions"><SyncStatus value={reading.syncStatus === "PENDING" ? "Pending sync" : reading.syncStatus === "CONFLICT" ? "Conflict" : "Failed"} />{reading.syncStatus === "FAILED" && <button type="button" className="quiet-link" onClick={() => onRetry(reading.idempotencyKey)}>Retry</button>}{reading.syncStatus === "CONFLICT" && <small>Discard to resolve</small>}<button type="button" className="quiet-link" onClick={() => onDiscard(reading.idempotencyKey)}>Discard</button></div></div>)}
+      {selectedReadings.map((reading) => <div className="readings-table-row" key={reading.id}><div><strong>{reading.id}</strong><small>{reading.farm ? `${reading.farm} · ` : ""}{reading.plot} <span>·</span> {reading.date}</small></div><strong>{measurement(reading.nitrogen, "ppm")}</strong><strong>{measurement(reading.phosphorus, "ppm")}</strong><strong>{measurement(reading.potassium, "ppm")}</strong><strong>{reading.soilTemperature === null || reading.humidity === null ? "Not recorded" : `${reading.soilTemperature} °C · ${reading.humidity}%`}</strong><SyncStatus value={reading.sync} /></div>)}
+      {selectedQueuedReadings.map((reading) => <div className="readings-table-row" key={reading.idempotencyKey}><div><strong>{reading.idempotencyKey.slice(0, 12)}</strong><small>{reading.plotCode} <span>·</span> {new Date(reading.recordedAt).toLocaleString()}</small>{reading.syncError && <small role="alert">{reading.syncError}</small>}</div><strong>{reading.nitrogen} ppm</strong><strong>{reading.phosphorus} ppm</strong><strong>{reading.potassium} ppm</strong><strong>{reading.soilTemperature} °C · {reading.humidity}%</strong><div className="queued-reading-actions"><SyncStatus value={reading.syncStatus === "PENDING" ? "Pending sync" : reading.syncStatus === "CONFLICT" ? "Conflict" : "Failed"} />{reading.syncStatus === "FAILED" && <button type="button" className="quiet-link" onClick={() => onRetry(reading.idempotencyKey)}>Retry</button>}{reading.syncStatus === "CONFLICT" && <small>Discard to resolve</small>}<button type="button" className="quiet-link" onClick={() => onDiscard(reading.idempotencyKey)}>Discard</button></div></div>)}
+      {selectedReadings.length === 0 && selectedQueuedReadings.length === 0 && <p className="science-caveat">No soil readings are recorded for this farm yet.</p>}
     </section>
     <p className="science-caveat">Measurements are recorded as provided by the field team. Interpretation requires scientist-approved methods.</p>
   </></Localize>;
 }
 function Recommendations({ seasons, recommendations, outcomes, canReview, pendingReview, setModal, onGenerate, onReview, onRecordOutcome }: { seasons: Season[]; recommendations: SavedRecommendation[]; outcomes: Outcome[]; canReview: boolean; pendingReview: boolean; setModal: (modal: Modal) => void; onGenerate: (seasonId: string) => void; onReview: (recommendationId: string, action: "approve" | "share") => void; onRecordOutcome: (seasonId: string) => void }) {
-  const badgeText = (status: string) => status === "SHARED" ? "REVIEWED & SHARED" : status === "APPROVED" ? "APPROVED · NOT SHARED" : "SCIENTIST REVIEW REQUIRED";
+  const activeRecommendations = recommendations.filter((recommendation) => recommendation.status !== "ARCHIVED");
+  const badgeText = (recommendation: SavedRecommendation) => recommendation.provider === "cropcycle-crop-knowledge-base" ? "UNCONFIRMED · PROVISIONAL" : recommendation.status === "SHARED" ? "REVIEWED & SHARED" : recommendation.status === "APPROVED" ? "APPROVED · NOT SHARED" : "SCIENTIST REVIEW REQUIRED";
   return <Localize><>
     <PageTitle kicker="DECISION SUPPORT · EXPERT KNOWLEDGE FIRST" title="Recommendations" description="Every assessment cites approved knowledge and the plot-season data used." action="＋ Prepare a season" onClick={() => setModal("season")}/>
-    <div className="recommendation-banner"><div className="rec-banner-symbol">✳</div><div><span className="banner-label">SCIENTIST-APPROVED KNOWLEDGE</span><h2>Experts define the rules.<br/>Every assessment shows its work.</h2><p>Only farmer-listed crops and currently approved expert rules are evaluated. Missing evidence stays visible; no LLM generates agronomic advice.</p></div><div className="banner-stamp">APPROVED SOURCES<br/><span>→</span> EXPLAINABLE REVIEW</div></div>
-    <section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">RECOMMENDATION HISTORY</div><h2>{recommendations.length} saved assessments</h2></div><span className="table-caption">{seasons.length} SEASONS</span></div>{seasons.length ? seasons.map((season) => <article className="recommendation-context-row" key={season.id}><span className="rec-row-symbol">✳</span><div className="history-main"><strong>{season.farm} · {season.plot}</strong><div className="season-meta">{season.name}<span>·</span>{season.method}</div></div><div className="history-crop"><small>FARMER-LISTED CROP(S)</small><strong>{season.crop}</strong></div><div className="recommendation-actions"><button className="button button-outline" onClick={() => onGenerate(season.id)}>Assess this season</button><button className="button button-outline quiet" onClick={() => onRecordOutcome(season.id)}>Record outcome</button></div></article>) : <Empty title="Start with a season record" detail="Add the plot, previous crop, farming method and requirements first." action="＋ Start a season" onClick={() => setModal("season")}/>}</section>
+    <div className="recommendation-banner"><div className="rec-banner-symbol">✳</div><div><span className="banner-label">CROP SCIENTIST KNOWLEDGE</span><h2>Experts define the ranges.<br/>Every assessment shows its work.</h2><p>New synced readings are compared with the crop scientist&apos;s Minna knowledge base. Missing soil evidence stays visible; assessments are provisional until required checks are available.</p></div><div className="banner-stamp">EXPERT SOURCES<br/><span>→</span> EXPLAINABLE REVIEW</div></div>
+    <section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">RECOMMENDATION HISTORY</div><h2>{activeRecommendations.length} saved assessments</h2></div><span className="table-caption">{seasons.length} SEASONS</span></div>{seasons.length ? seasons.map((season) => <article className="recommendation-context-row" key={season.id}><span className="rec-row-symbol">✳</span><div className="history-main"><strong>{season.farm} · {season.plot}</strong><div className="season-meta">{season.name}<span>·</span>{season.method}</div></div><div className="history-crop"><small>FARMER-LISTED CROP(S)</small><strong>{season.crop}</strong></div><div className="recommendation-actions"><button className="button button-outline" onClick={() => onGenerate(season.id)}>Assess this season</button><button className="button button-outline quiet" onClick={() => onRecordOutcome(season.id)}>Record outcome</button></div></article>) : <Empty title="Start with a season record" detail="Add the plot, previous crop, farming method and requirements first." action="＋ Start a season" onClick={() => setModal("season")}/>}</section>
     {outcomes.length > 0 && <section className="panel list-page-panel"><div className="panel-header"><div><div className="section-kicker">PLANTED CROPS & FARMER FEEDBACK</div><h2>{outcomes.length} recorded outcomes</h2></div><span className="table-caption">ACTUAL CROPS · SEASONAL MEMORY</span></div>{outcomes.map((outcome) => { const recommendation = recommendations.find((item) => item.id === outcome.recommendationId); return <article className="recommendation-context-row" key={outcome.id}><span className="rec-row-symbol">✓</span><div className="history-main"><strong>{outcome.farm} · {outcome.plot}</strong><div className="season-meta">{outcome.season} · Recorded {new Date(outcome.recordedAt).toLocaleDateString()}</div></div><div className="history-crop"><small>ACTUALLY PLANTED</small><strong>{outcome.actualCrops.join(" + ")}</strong></div><div className="history-crop"><small>RECOMMENDATION</small><strong>{recommendation ? `Version ${recommendation.version}` : "Not linked"}</strong></div><div className="history-method"><small>FEEDBACK</small><strong>{outcome.feedback.map((feedback) => [feedback.rating ? `${feedback.rating}/5` : "", feedback.comment].filter(Boolean).join(" · ")).filter(Boolean).join(" / ") || outcome.notes || "None recorded"}</strong></div></article>; })}</section>}
-    {recommendations.map((recommendation) => <section className="panel recommendation-result-card" key={recommendation.id}>
-      <div className="panel-header"><div><div className="section-kicker">SAVED ASSESSMENT · VERSION {recommendation.version}</div><h2>{recommendation.farm} · {recommendation.plot}</h2><p>{recommendation.season} · {new Date(recommendation.createdAt).toLocaleString()}</p></div><span className="review-badge">{badgeText(recommendation.status)}</span></div>
+    {activeRecommendations.map((recommendation) => <section className="panel recommendation-result-card" key={recommendation.id}>
+      <div className="panel-header"><div><div className="section-kicker">SAVED ASSESSMENT · VERSION {recommendation.version}</div><h2>{recommendation.farm} · {recommendation.plot}</h2><p>{recommendation.season} · {new Date(recommendation.createdAt).toLocaleString()}</p></div><span className="review-badge">{badgeText(recommendation)}</span></div>
       <p className="science-caveat">{recommendation.result.notice}</p>
       {recommendation.result.candidates.length ? recommendation.result.candidates.map((candidate) => <article className="assessment-crop" key={candidate.crop}>
-        <div className="assessment-crop-title"><h3>{candidate.crop}</h3><span className={`assessment-status assessment-${candidate.suitability}`}>{candidate.suitability === "supported" ? "Within approved criteria" : candidate.suitability === "review-needed" ? "Review needed" : "Insufficient data"}</span></div>
+        <div className="assessment-crop-title"><h3>{candidate.crop}</h3><span className={`assessment-status assessment-${candidate.suitability}`}>{candidate.suitability === "supported" ? "Within approved criteria" : candidate.suitability === "review-needed" ? "Review needed" : candidate.suitability === "unsuitable" ? "Not suitable as-is" : "Insufficient data"}</span></div>
         {candidate.reasons.length > 0 && <p><strong>Reasons:</strong> {candidate.reasons.join(" · ")}</p>}
         {candidate.alternatives.length > 0 && <p><strong>Expert-listed alternatives:</strong> {candidate.alternatives.join(", ")}</p>}
         {candidate.considerations.length > 0 && <p><strong>Considerations:</strong> {candidate.considerations.join(" · ")}</p>}
         {candidate.knowledge.length > 0 && <ul>{candidate.knowledge.map((source) => <li key={source.id}>{source.title} (v{source.version}) — {source.source}</li>)}</ul>}
       </article>) : <p className="science-caveat">No candidate crop was recorded. Add intended, available, or marketable crops to the season first.</p>}
-      <div className="assessment-data"><strong>Data used</strong><span>Nitrogen: {recommendation.result.dataUsed.soil.nitrogen ?? "not recorded"} ppm</span><span>Phosphorus: {recommendation.result.dataUsed.soil.phosphorus ?? "not recorded"} ppm</span><span>Potassium: {recommendation.result.dataUsed.soil.potassium ?? "not recorded"} ppm</span><span>Soil temperature: {recommendation.result.dataUsed.soil.soilTemperature ?? "not recorded"} °C</span><span>Humidity: {recommendation.result.dataUsed.soil.humidity ?? "not recorded"}%</span><span>Previous crops: {recommendation.result.dataUsed.previousCrops.join(", ") || "not recorded"}</span><span>Intended: {recommendation.result.dataUsed.intendedCrops.join(", ") || "not recorded"}</span><span>Available: {recommendation.result.dataUsed.availableCrops.join(", ") || "not recorded"}</span><span>Market: {recommendation.result.dataUsed.marketableCrops.join(", ") || "not recorded"}</span><span>Preferred method: {recommendation.result.dataUsed.preferredMethod ?? "not recorded"}</span>{recommendation.result.dataUsed.otherRequirements && <span>Other requirements: {recommendation.result.dataUsed.otherRequirements}</span>}</div>
-      {canReview && <div className="knowledge-actions">{recommendation.status === "NEEDS_REVIEW" && <button className="button button-dark" onClick={() => onReview(recommendation.id, "approve")}>Approve assessment</button>}{recommendation.status === "APPROVED" && <button className="button button-dark" onClick={() => onReview(recommendation.id, "share")}>Share with farm</button>}{recommendation.reviewedAt && <small>Reviewed {new Date(recommendation.reviewedAt).toLocaleString()}</small>}</div>}
+      <div className="assessment-data"><strong>Data used</strong><span>Nitrogen: {recommendation.result.dataUsed.soil.nitrogen ?? "not recorded"} ppm</span><span>Phosphorus: {recommendation.result.dataUsed.soil.phosphorus ?? "not recorded"} ppm</span><span>Potassium: {recommendation.result.dataUsed.soil.potassium ?? "not recorded"} ppm</span><span>Soil moisture: {recommendation.result.dataUsed.soil.moisture ?? "not recorded"}%</span><span>Soil temperature: {recommendation.result.dataUsed.soil.soilTemperature ?? "not recorded"} °C</span><span>pH: {recommendation.result.dataUsed.soil.pH ?? "not recorded"}</span><span>EC: {recommendation.result.dataUsed.soil.electricalConductivity ?? "not recorded"}</span><span>Humidity: {recommendation.result.dataUsed.soil.humidity ?? "not recorded"}%</span><span>Previous crops: {recommendation.result.dataUsed.previousCrops.join(", ") || "not recorded"}</span><span>Intended: {recommendation.result.dataUsed.intendedCrops.join(", ") || "not recorded"}</span><span>Available: {recommendation.result.dataUsed.availableCrops.join(", ") || "not recorded"}</span><span>Market: {recommendation.result.dataUsed.marketableCrops.join(", ") || "not recorded"}</span><span>Preferred method: {recommendation.result.dataUsed.preferredMethod ?? "not recorded"}</span>{recommendation.result.dataUsed.otherRequirements && <span>Other requirements: {recommendation.result.dataUsed.otherRequirements}</span>}</div>
+      {canReview && <div className="knowledge-actions">{recommendation.status === "NEEDS_REVIEW" && (recommendation.provider === "cropcycle-crop-knowledge-base" ? <small>Provisional only: collect soil pH and EC before approval.</small> : <button className="button button-dark" onClick={() => onReview(recommendation.id, "approve")}>Approve assessment</button>)}{recommendation.status === "APPROVED" && <button className="button button-dark" onClick={() => onReview(recommendation.id, "share")}>Share with farm</button>}{recommendation.reviewedAt && <small>Reviewed {new Date(recommendation.reviewedAt).toLocaleString()}</small>}</div>}
     </section>)}
     {pendingReview && <Note text="Your latest soil reading is synced and awaiting assessment and Crop Scientist review. Crop suggestions will appear here after the assessment is approved and shared."/ >}
-    {recommendations.length === 0 && !pendingReview && <Note text="Assessments require farmer-listed crops. Only currently approved, region-matched Crop Scientist rules are applied; no rule means no crop suggestion."/ >}
+    {activeRecommendations.length === 0 && !pendingReview && <Note text="No active assessments yet. New synced soil readings will be assessed against the crop scientist's crop knowledge base."/ >}
   </></Localize>;
 }
 

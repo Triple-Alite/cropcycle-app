@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma, SyncStatus } from "@prisma/client";
+import { prepareAutomaticRecommendation } from "@/lib/automatic-recommendations";
 import { prisma } from "@/lib/prisma";
 
 type SheetRow = Record<string, unknown>;
@@ -15,6 +16,7 @@ export type SheetDbSyncResult = {
   imported: number;
   duplicates: number;
   skipped: number;
+  recommendationsPrepared: number;
   issues: string[];
   diagnostics: {
     rowCount: number;
@@ -167,6 +169,7 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
     imported: 0,
     duplicates: 0,
     skipped: 0,
+    recommendationsPrepared: 0,
     issues: [],
     diagnostics: {
       rowCount: sheetRows.length,
@@ -370,6 +373,7 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
     }
   }
 
+  const candidatesForAssessment = new Map<string, Candidate>();
   for (let offset = 0; offset < uniqueCandidates.length; offset += 500) {
     const batch = uniqueCandidates.slice(offset, offset + 500);
     const existingReadings = await prisma.soilReading.findMany({
@@ -405,7 +409,22 @@ export async function importSheetDbReadings(): Promise<SheetDbSyncResult> {
       });
       result.imported += created.count;
       result.duplicates += toCreate.length - created.count;
+      for (const candidate of toCreate) {
+        const current = candidatesForAssessment.get(candidate.seasonId);
+        if (
+          !current ||
+          new Date(candidate.reading.recordedAt ?? 0).getTime() >
+          new Date(current.reading.recordedAt ?? 0).getTime()
+        ) {
+          candidatesForAssessment.set(candidate.seasonId, candidate);
+        }
+      }
     }
+  }
+
+  for (const [seasonId, candidate] of candidatesForAssessment) {
+    const prepared = await prepareAutomaticRecommendation(seasonId, candidate.key);
+    if (prepared.status === "created") result.recommendationsPrepared += 1;
   }
 
   return result;

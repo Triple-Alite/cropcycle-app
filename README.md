@@ -46,12 +46,13 @@ Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and mak
 - Server-backed, versioned recommendation history with scientist review and sharing.
 - Outcome capture for actual planted crops, optional yield, notes and recommendation feedback; actual crops carry into later seasons.
 - A browser-local, stable-ID soil-reading queue with batch sync, duplicate detection and visible conflicts for manual resolution.
-- Source-cited agricultural knowledge with approval lifecycle; recommendations use only approved rules.
+- Source-cited agricultural knowledge with approval lifecycle; manually prepared assessments use only approved rules.
+- New synced readings automatically generate a provisional shortlist from `crop_knowledge_base.xlsx` (bundled as versioned JSON) and show it to linked farm members as **UNCONFIRMED**. The current sensor feed lacks pH and electrical conductivity, so those scientist-defined hard gates remain unconfirmed; validate the Minna-specific ranges with local extension guidance. A migration archives existing recommendations while preserving their records.
 - Responsive layouts, reduced-motion support and English-first UI.
 
 ## Prototype boundaries
 
-Production deployment still requires environment-specific security review, database backup/operations, email delivery configuration, and end-to-end validation against the target PostgreSQL instance. Offline readings are held in browser localStorage until batch sync succeeds; conflicting IDs are retained for a user to retry or discard. Agricultural recommendations remain constrained to approved, cited knowledge and require scientist review before sharing.
+Production deployment still requires environment-specific security review, database backup/operations, email delivery configuration, and end-to-end validation against the target PostgreSQL instance. Offline readings are held in browser localStorage until batch sync succeeds; conflicting IDs are retained for a user to retry or discard. Spreadsheet-based crop assessments are provisional where required sensor or rotation data is missing, and require scientist review before sharing.
 
 Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RESET_EMAIL_API_KEY`, and the public HTTPS base URL in `CROPCYCLE_APP_URL`. The email endpoint must accept a bearer-authenticated `POST` with the recipient, the `cropcycle-password-reset` template name, and a `resetUrl` in its template data. For account privacy, reset requests return the same generic response whether or not an account exists; email delivery failures are recorded in the server logs.
 

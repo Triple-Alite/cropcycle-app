@@ -2,19 +2,11 @@ import { KnowledgeStatus, Prisma, RecommendationStatus, UserRole } from "@prisma
 import { NextRequest, NextResponse } from "next/server";
 import { parseKnowledgeBody } from "@/lib/agricultural-knowledge";
 import { errorResponse, validationError } from "@/lib/api";
+import { prepareAutomaticRecommendation } from "@/lib/automatic-recommendations";
 import { requireSessionUser } from "@/lib/auth";
 import { ActiveRule, assessCrops, SeasonRecommendationContext } from "@/lib/recommendation-engine";
 import { farmWhere, farmingMethodLabel, hasFarmPermission, recommendationWhere } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
-
-function hasSameReadingSnapshot(snapshot: Prisma.JsonValue, recordedAt: string) {
-  if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) return false;
-  const soil = snapshot.soil;
-  return typeof soil === "object" &&
-    soil !== null &&
-    !Array.isArray(soil) &&
-    soil.recordedAt === recordedAt;
-}
 
 export async function GET() {
   try {
@@ -77,6 +69,25 @@ export async function POST(request: NextRequest) {
     if (!await hasFarmPermission(user, season.farmId, "canViewRecommendations")) {
       return validationError("You do not have permission to assess this farm's recommendations.", 403);
     }
+    if (automatic) {
+      const prepared = await prepareAutomaticRecommendation(season.id);
+      if (prepared.status === "reading-not-found") {
+        return validationError("A synced soil reading is required before preparing an assessment.", 409);
+      }
+      if (prepared.status === "season-inactive") {
+        return validationError("Only active or planning seasons can be assessed.", 409);
+      }
+      if (prepared.status === "season-not-found") {
+        return validationError("Season not found or not accessible.", 404);
+      }
+      if (prepared.status === "already-assessed") {
+        return NextResponse.json({ alreadyAssessed: true });
+      }
+      return NextResponse.json(
+        { recommendation: prepared.recommendation, alreadyAssessed: false },
+        { status: 201 },
+      );
+    }
 
     const [reading, approvedRules] = await Promise.all([
       prisma.soilReading.findFirst({
@@ -91,6 +102,7 @@ export async function POST(request: NextRequest) {
           nitrogen: true,
           phosphorus: true,
           potassium: true,
+          moisture: true,
           soilTemperature: true,
           humidity: true,
           recordedAt: true,
@@ -160,6 +172,9 @@ export async function POST(request: NextRequest) {
         .filter((crop) => crop.recordType === "PREVIOUS" || crop.recordType === "ACTUAL")
         .map((crop) => crop.name),
       soil: {
+        moisture: reading?.moisture === null || reading?.moisture === undefined ? null : Number(reading.moisture),
+        pH: null,
+        electricalConductivity: null,
         nitrogen: reading?.nitrogen === null || reading?.nitrogen === undefined ? null : Number(reading.nitrogen),
         phosphorus: reading?.phosphorus === null || reading?.phosphorus === undefined ? null : Number(reading.phosphorus),
         potassium: reading?.potassium === null || reading?.potassium === undefined ? null : Number(reading.potassium),
@@ -168,9 +183,6 @@ export async function POST(request: NextRequest) {
         recordedAt: reading?.recordedAt.toISOString() ?? null,
       },
     };
-    if (automatic && !context.soil.recordedAt) {
-      return validationError("A synced soil reading is required before preparing an assessment.", 409);
-    }
     const result = assessCrops(context, activeRules);
     const citedRuleIds = new Set(
       result.candidates.flatMap((candidate) => candidate.knowledge.map((rule) => rule.id)),
@@ -178,16 +190,6 @@ export async function POST(request: NextRequest) {
     const citedRules = activeRules.filter((rule) => citedRuleIds.has(rule.id));
 
     const recommendation = await prisma.$transaction(async (tx) => {
-      if (automatic && context.soil.recordedAt) {
-        const latestRecommendation = await tx.recommendation.findFirst({
-          where: { seasonId: season.id },
-          orderBy: { createdAt: "desc" },
-          select: { inputSnapshot: true },
-        });
-        if (latestRecommendation && hasSameReadingSnapshot(latestRecommendation.inputSnapshot, context.soil.recordedAt)) {
-          return null;
-        }
-      }
       const latest = await tx.recommendation.aggregate({
         where: { seasonId: season.id },
         _max: { version: true },
@@ -221,6 +223,9 @@ export async function POST(request: NextRequest) {
             marketableCrops: context.marketableCrops,
             previousCrops: context.previousCrops,
             soil: {
+              moisture: context.soil.moisture,
+              pH: context.soil.pH,
+              electricalConductivity: context.soil.electricalConductivity,
               nitrogen: context.soil.nitrogen,
               phosphorus: context.soil.phosphorus,
               potassium: context.soil.potassium,
@@ -246,6 +251,9 @@ export async function POST(request: NextRequest) {
             })),
             dataUsed: {
               soil: {
+                moisture: context.soil.moisture,
+                pH: context.soil.pH,
+                electricalConductivity: context.soil.electricalConductivity,
                 nitrogen: context.soil.nitrogen,
                 phosphorus: context.soil.phosphorus,
                 potassium: context.soil.potassium,

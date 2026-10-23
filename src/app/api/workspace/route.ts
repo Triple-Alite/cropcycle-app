@@ -55,9 +55,12 @@ export async function GET() {
       }),
       prisma.soilReading.findMany({
         where: { farm: farmWhere(user) },
-        include: { plot: { select: { name: true } } },
+        include: {
+          plot: { select: { name: true } },
+          farm: { select: { farmCode: true, name: true } },
+        },
         orderBy: { recordedAt: "desc" },
-        take: 20,
+        take: 100,
       }),
       prisma.recommendation.findMany({
         where: recommendationWhere(user),
@@ -187,7 +190,7 @@ export async function GET() {
       readings: readings.map((reading) => ({
         id: reading.id,
         farmerId: reading.farmerId,
-        farmId: reading.farmId,
+        farmId: reading.farm.farmCode,
         plotId: reading.plotId,
         seasonId: reading.seasonId,
         deviceId: reading.deviceId ?? undefined,
@@ -200,11 +203,13 @@ export async function GET() {
         soilTemperature: reading.soilTemperature === null ? null : Number(reading.soilTemperature),
         humidity: reading.humidity === null ? null : Number(reading.humidity),
         sync: reading.syncStatus === "SYNCED" ? "Synced" : "Pending sync",
+        farm: reading.farm.name,
       })),
       recommendations: recommendations.map((recommendation) => ({
         id: recommendation.id,
         version: recommendation.version,
         status: recommendation.status,
+        provider: recommendation.provider,
         reviewedAt: recommendation.reviewedAt?.toISOString() ?? null,
         createdAt: recommendation.createdAt.toISOString(),
         farm: recommendation.farm.name,
