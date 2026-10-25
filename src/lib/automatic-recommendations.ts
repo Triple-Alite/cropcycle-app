@@ -77,9 +77,12 @@ export async function prepareAutomaticRecommendation(
     const existing = await tx.recommendation.findFirst({
       where: { seasonId: season.id },
       orderBy: { createdAt: "desc" },
-      select: { inputSnapshot: true },
+      select: { inputSnapshot: true, provider: true },
     });
-    if (existing && hasSameReadingSnapshot(existing.inputSnapshot, soil.recordedAt!)) return null;
+    if (
+      existing?.provider === "cropcycle-crop-knowledge-base" &&
+      hasSameReadingSnapshot(existing.inputSnapshot, soil.recordedAt)
+    ) return null;
 
     const latest = await tx.recommendation.aggregate({
       where: { seasonId: season.id },

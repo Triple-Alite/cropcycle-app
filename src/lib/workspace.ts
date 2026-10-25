@@ -76,7 +76,12 @@ export function recommendationWhere(user: SessionUser): Prisma.RecommendationWhe
         { status: "NEEDS_REVIEW", provider: "cropcycle-crop-knowledge-base" },
         { status: "ARCHIVED" },
       ],
-      farm: { owner: { userId: user.id } },
+      farm: {
+        OR: [
+          { owner: { userId: user.id } },
+          { memberships: { some: { userId: user.id, canViewRecommendations: true } } },
+        ],
+      },
     };
   }
   return {

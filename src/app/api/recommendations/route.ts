@@ -44,8 +44,8 @@ export async function POST(request: NextRequest) {
       return validationError("Automatic assessment flag must be true or false.");
     }
     const automatic = "automatic" in body && body.automatic === true;
-    if (automatic && user.role !== UserRole.ADMIN) {
-      return validationError("Only administrators can prepare automatic assessment drafts.", 403);
+    if (automatic && user.role !== UserRole.ADMIN && user.role !== UserRole.FARMER) {
+      return validationError("Only administrators or farmers can request a crop recommendation.", 403);
     }
     const season = await prisma.season.findFirst({
       where: {

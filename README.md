@@ -47,7 +47,7 @@ Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and mak
 - Outcome capture for actual planted crops, optional yield, notes and recommendation feedback; actual crops carry into later seasons.
 - A browser-local, stable-ID soil-reading queue with batch sync, duplicate detection and visible conflicts for manual resolution.
 - Source-cited agricultural knowledge with approval lifecycle; manually prepared assessments use only approved rules.
-- New synced readings automatically generate a provisional shortlist from `crop_knowledge_base.xlsx` (bundled as versioned JSON) and show it to linked farm members as **UNCONFIRMED**. The current sensor feed lacks pH and electrical conductivity, so those scientist-defined hard gates remain unconfirmed; validate the Minna-specific ranges with local extension guidance. A migration archives existing recommendations while preserving their records.
+- New synced readings generate a provisional shortlist from `crop_knowledge_base.xlsx` (bundled as versioned JSON). Farmers can click **Recommend** for a season with a synced reading to open the crop list and see the reading values used; the shortlist is marked **UNCONFIRMED**. The current sensor feed lacks pH and electrical conductivity, so those scientist-defined hard gates remain unconfirmed; validate the Minna-specific ranges with local extension guidance. A migration archives existing recommendations while preserving their records.
 - Responsive layouts, reduced-motion support and English-first UI.
 
 ## Prototype boundaries
