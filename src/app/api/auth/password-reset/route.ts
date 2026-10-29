@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     const endpoint = process.env.PASSWORD_RESET_EMAIL_ENDPOINT;
     const apiKey = process.env.PASSWORD_RESET_EMAIL_API_KEY;
-    const appUrl = process.env.CROPCYCLE_APP_URL;
+    const appUrl = process.env.AGROGAUGE_APP_URL || process.env.CROPCYCLE_APP_URL;
     if (Boolean(endpoint) !== Boolean(apiKey)) {
       return validationError("Password reset email endpoint and API key must be configured together.", 503);
     }

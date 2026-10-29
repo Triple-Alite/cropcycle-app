@@ -12,7 +12,7 @@ export async function PATCH(
 ) {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can update visits.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge service operations can update visits.", 403);
     const { serviceVisitId } = await params;
     const body: unknown = await request.json();
     if (!body || typeof body !== "object") return validationError("A valid JSON object is required.");

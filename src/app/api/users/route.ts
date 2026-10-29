@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       return validationError("Password must be between 12 and 128 characters.");
     }
     if (!isUserRole(role)) {
-      return validationError("Choose a valid CropCycle role.");
+      return validationError("Choose a valid AgroGauge role.");
     }
 
     const normalizedEmail = email.trim().toLowerCase();

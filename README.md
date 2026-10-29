@@ -1,6 +1,6 @@
-# CropCycle
+# AgroGauge
 
-A field-focused CropCycle MVP prototype built with Next.js, React and TypeScript.
+A field-focused AgroGauge MVP prototype built with Next.js, React and TypeScript.
 
 ## Run locally
 
@@ -38,7 +38,7 @@ Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and mak
 - Farm ownership with one Farms page; optional fields/plots are managed inside their farm and can have locations and GPS coordinates.
 - Workspace overview for farmers, farms, active seasons and soil readings.
 - Add-farm, add-field, start-season and record-reading flows linked to registered records.
-- Farmer and field-agent service requests with farm-scoped visit status and schedule visibility; CropCycle administrators handle visit scheduling, staff assignment, device linkage, and operations notes.
+- Farmer and field-agent service requests with farm-scoped visit status and schedule visibility; AgroGauge administrators handle visit scheduling, staff assignment, device linkage, and operations notes.
 - Admin-only device operations for registering service devices, recording ownership and firmware, assigning or releasing devices to farms and fields, and tracking active, inactive, maintenance, or retired status.
 - Previous/intended crops, crops available, market crops and mono-cropping/mixed-farming fields.
 - Farmer crop selections are limited to Yam, Maize, Beans, Guinea Corn, Rice, Groundnut, Soya Beans, Tomatoes, Pepper, Millet, Okro, Bambara nut, Cassava, Spinach, Hibiscus, Potatoes, Sheanut, Sesame, Sugarcane, Gardenegg and Onions; season, outcome and agricultural-knowledge APIs enforce this same list.
@@ -54,7 +54,7 @@ Profile photos use Vercel Blob. Create or connect a Blob store in Vercel and mak
 
 Production deployment still requires environment-specific security review, database backup/operations, email delivery configuration, and end-to-end validation against the target PostgreSQL instance. Offline readings are held in browser localStorage until batch sync succeeds; conflicting IDs are retained for a user to retry or discard. Spreadsheet-based crop assessments are provisional where required sensor or rotation data is missing, and require scientist review before sharing.
 
-Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RESET_EMAIL_API_KEY`, and the public HTTPS base URL in `CROPCYCLE_APP_URL`. The email endpoint must accept a bearer-authenticated `POST` with the recipient, the `cropcycle-password-reset` template name, and a `resetUrl` in its template data. For account privacy, reset requests return the same generic response whether or not an account exists; email delivery failures are recorded in the server logs.
+Production password resets require `PASSWORD_RESET_EMAIL_ENDPOINT`, `PASSWORD_RESET_EMAIL_API_KEY`, and the public HTTPS base URL in `AGROGAUGE_APP_URL`. The email endpoint must accept a bearer-authenticated `POST` with the recipient, the `cropcycle-password-reset` template name, and a `resetUrl` in its template data. For account privacy, reset requests return the same generic response whether or not an account exists; email delivery failures are recorded in the server logs.
 
 Apply the Prisma schema before exercising database-backed workflows. Vercel Production builds run `prisma migrate deploy` before building the app; Preview builds skip migrations. Other deployment targets must run `npm run db:deploy` against the intended database. Validate signup/login, farm and season access controls, outcome capture, recommendation history, and reading synchronization against the configured PostgreSQL database. The browser queue is device-local and is not a substitute for server backup.
 

@@ -11,7 +11,7 @@ const statuses = new Set(Object.values(DeviceStatus));
 export async function GET() {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can manage devices.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge service operations can manage devices.", 403);
     const [devices, farms, plots] = await Promise.all([
       prisma.device.findMany({
         include: {
@@ -60,7 +60,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can register devices.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge service operations can register devices.", 403);
     const body: unknown = await request.json();
     if (!body || typeof body !== "object") return validationError("A valid JSON object is required.");
     const input = body as Record<string, unknown>;

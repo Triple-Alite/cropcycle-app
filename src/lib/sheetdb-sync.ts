@@ -315,7 +315,7 @@ export async function importSheetDbReadings(requestedNodeId?: string): Promise<S
       const device = deviceByNodeId.get(row.nodeId);
       issue(row.rowNumber, device
         ? `Device "${row.nodeId}" must be assigned to a farm and field.`
-        : `No CropCycle device is mapped to Node_ID "${row.nodeId}".`);
+        : `No AgroGauge device is mapped to Node_ID "${row.nodeId}".`);
       continue;
     }
     if (location.device.status !== "ACTIVE") {

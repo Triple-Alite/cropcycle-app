@@ -143,7 +143,7 @@ export async function DELETE() {
   try {
     const user = await requireSessionUser();
     if (user.role !== UserRole.ADMIN) {
-      return validationError("Only CropCycle administrators can clear soil readings.", 403);
+      return validationError("Only AgroGauge administrators can clear soil readings.", 403);
     }
 
     const result = await prisma.soilReading.deleteMany();

@@ -2,11 +2,11 @@ import Image from "next/image";
 
 export default function Loading() {
   return (
-    <main className="app-loading" aria-label="Loading CropCycle">
+    <main className="app-loading" aria-label="Loading AgroGauge">
       <div className="app-loading-content" role="status" aria-live="polite">
         <Image
-          src="/cropcycle-logo-white.png"
-          alt="CropCycle"
+          src="/agrogauge-logo-white.png"
+          alt="AgroGauge"
           width={386}
           height={111}
           className="app-loading-logo"

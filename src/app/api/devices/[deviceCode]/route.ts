@@ -13,7 +13,7 @@ export async function PATCH(
 ) {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can update devices.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge service operations can update devices.", 403);
     const { deviceCode } = await params;
     const body: unknown = await request.json();
     if (!body || typeof body !== "object") return validationError("A valid JSON object is required.");
@@ -123,7 +123,7 @@ export async function DELETE(
 ) {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle service operations can delete devices.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge service operations can delete devices.", 403);
 
     const { deviceCode } = await params;
     const device = await prisma.device.findUnique({

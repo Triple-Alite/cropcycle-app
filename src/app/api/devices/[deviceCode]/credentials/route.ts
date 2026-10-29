@@ -11,7 +11,7 @@ export async function POST(
 ) {
   try {
     const user = await requireSessionUser();
-    if (user.role !== UserRole.ADMIN) return validationError("Only CropCycle administrators can issue device credentials.", 403);
+    if (user.role !== UserRole.ADMIN) return validationError("Only AgroGauge administrators can issue device credentials.", 403);
     const { deviceCode } = await params;
     const deviceExists = await prisma.device.findUnique({ where: { deviceCode }, select: { id: true } });
     if (!deviceExists) return validationError("Device not found.", 404);

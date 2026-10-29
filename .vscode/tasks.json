@@ -2,7 +2,7 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Run CropCycle development server",
+			"label": "Run AgroGauge development server",
 			"type": "shell",
 			"command": "npm",
 			"args": [

@@ -44,23 +44,23 @@ export default function ResetPasswordForm({ token }: { token: string }) {
       <header className="landing-nav">
         <Link className="landing-brand" href="/">
           <span className="brand-mark">c</span>
-          <span>cropcycle<span className="brand-period">.</span></span>
+          <span>AgroGauge<span className="brand-period">.</span></span>
         </Link>
       </header>
       <section className="auth-page-wrap">
         <section className="auth-dialog" aria-labelledby="reset-title">
-          <span className="brand-mark" role="img" aria-label="CropCycle logo"/>
-          <div className="auth-kicker">CROPCYCLE WORKSPACE</div>
+          <span className="brand-mark" role="img" aria-label="AgroGauge logo"/>
+          <div className="auth-kicker">AGROGAUGE WORKSPACE</div>
           <h1 id="reset-title">{complete ? "Password updated." : "Choose a new password."}</h1>
           {complete ? (
             <>
               <p className="auth-subtitle">Your password has been changed. Sign in with your new password.</p>
-              <Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link>
+              <Link className="button button-dark auth-submit" href="/">Return to AgroGauge <span>↗</span></Link>
             </>
           ) : !token ? (
             <>
               <p className="auth-subtitle">This password reset link is invalid or missing.</p>
-              <Link className="button button-dark auth-submit" href="/">Return to CropCycle <span>↗</span></Link>
+              <Link className="button button-dark auth-submit" href="/">Return to AgroGauge <span>↗</span></Link>
             </>
           ) : (
             <>
